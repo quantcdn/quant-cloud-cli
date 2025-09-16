@@ -1,6 +1,6 @@
 import { getActivePlatformConfig } from './config.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi } from 'quant-ts-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 

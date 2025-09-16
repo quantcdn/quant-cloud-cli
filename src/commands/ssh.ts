@@ -5,7 +5,7 @@ import inquirer from 'inquirer';
 import { getActivePlatformConfig } from '../utils/config.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
-import { SSHAccessApi, GetSshAccessCredentials200Response } from 'quant-ts-client';
+import { SSHAccessApi, GetSshAccessCredentials200Response } from '@quantcdn/quant-client';
 
 interface SSHOptions {
   container?: string;
