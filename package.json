@@ -1,6 +1,6 @@
 {
   "name": "@quantcdn/quant-cloud-cli",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Command-line interface for Quant Cloud Platform integration and management",
   "type": "module",
   "main": "dist/index.js",
@@ -13,7 +13,9 @@
     "dev": "ts-node --esm src/index.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "release": "npm version patch && git push && git push --tags"
   },
   "keywords": [
     "quant",
@@ -66,5 +68,10 @@
   },
   "engines": {
     "node": ">=16.0.0"
-  }
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "package.json"
+  ]
 }
