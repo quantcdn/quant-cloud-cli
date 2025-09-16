@@ -6,8 +6,8 @@ import inquirer from 'inquirer';
 import { createServer } from 'http';
 import { URL } from 'url';
 import { createHash, randomBytes } from 'crypto';
-import { AuthConfig, UserInfo } from '../types/auth.js';
-import { saveAuthConfig, loadAuthConfig } from '../utils/config.js';
+import { AuthConfig, UserInfo, PlatformInfo } from '../types/auth.js';
+import { saveAuthConfig, loadAuthConfig, savePlatformConfig, getActivePlatformConfig, listPlatforms } from '../utils/config.js';
 import { Logger } from '../utils/logger.js';
 
 const logger = new Logger('Login');
@@ -45,12 +45,56 @@ async function handleLogin(options: LoginOptions) {
   const spinner = createSpinner('Initializing authentication flow...');
   
   try {
-    // Check if already authenticated
-    const existingAuth = await loadAuthConfig();
-    if (existingAuth && existingAuth.token && !isTokenExpired(existingAuth)) {
-  spinner.succeed('Already authenticated');
-      logger.info(`Logged in as: ${chalk.cyan(existingAuth.email || 'Unknown User')}`);
-      return;
+    // Check for existing platforms
+    const existingPlatforms = await listPlatforms();
+    const activeAuth = await getActivePlatformConfig();
+    
+    if (existingPlatforms.length > 0) {
+      spinner.stop();
+      
+      console.log(chalk.bold('Current Authentication Status:'));
+      existingPlatforms.forEach(({ id, info, isActive }) => {
+        const status = isActive ? chalk.green('[ACTIVE]') : chalk.gray('[inactive]');
+        console.log(`  ${isActive ? '●' : '○'} ${info.name} ${status} - ${chalk.gray(info.host)}`);
+      });
+      console.log();
+      
+      const { action } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'action',
+          message: 'What would you like to do?',
+          choices: [
+            { name: 'Add another platform', value: 'add' },
+            { name: 'Re-authenticate current platform', value: 'reauth' },
+            { name: 'Cancel', value: 'cancel' }
+          ]
+        }
+      ]);
+      
+      if (action === 'cancel') {
+        logger.info('Login cancelled.');
+        return;
+      }
+      
+      if (action === 'reauth' && activeAuth && !isTokenExpired(activeAuth)) {
+        const { confirm } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'confirm',
+            message: `Re-authenticate with current platform? This will replace your existing session.`,
+            default: false
+          }
+        ]);
+        
+        if (!confirm) {
+          logger.info('Re-authentication cancelled.');
+          return;
+        }
+      }
+      
+      // Resume spinner for the authentication flow
+      spinner.start();
     }
     
     let service: ServiceOption;
@@ -142,9 +186,21 @@ async function handleLogin(options: LoginOptions) {
       activeOrganization: userInfo.organizations.length > 0 ? userInfo.organizations[0].machine_name : undefined
     };
     
-    await saveAuthConfig(authConfig);
+    // Generate platform info
+    const platformInfo: PlatformInfo = {
+      id: service.value,
+      name: service.name.split(' - ')[0], // Extract first part of name
+      host: service.host,
+      description: service.description
+    };
     
-    spinner.succeed('Authentication successful');
+    // Check if this is a new platform or re-authentication
+    const wasExisting = existingPlatforms.some(p => p.id === platformInfo.id);
+    
+    // Save to multi-platform config
+    await savePlatformConfig(platformInfo.id, authConfig, platformInfo);
+    
+    spinner.succeed(wasExisting ? 'Re-authentication successful' : 'New platform authenticated');
     logger.info(`${chalk.green('Platform:')} ${chalk.cyan(service.name.split(' - ')[0])}`);
     logger.info(`${chalk.green('Logged in as:')} ${chalk.cyan(userInfo.name)} (${chalk.cyan(userInfo.email)})`);
     logger.info(`${chalk.green('Access token:')} ${chalk.gray(tokenData.access_token.substring(0, 20) + '...')}`);
@@ -156,6 +212,13 @@ async function handleLogin(options: LoginOptions) {
         logger.info(`${chalk.green('Active organization:')} ${chalk.cyan(userInfo.organizations[0].name)} (${chalk.gray(userInfo.organizations[0].machine_name)})`);
         logger.info(`${chalk.gray('Use')} ${chalk.cyan('quant-cloud org switch')} ${chalk.gray('to change organizations')}`);
       }
+    }
+    
+    // Show platform management hint if multiple platforms exist
+    const updatedPlatforms = await listPlatforms();
+    if (updatedPlatforms.length > 1) {
+      console.log();
+      logger.info(`${chalk.gray('💡 Tip: Use')} ${chalk.cyan('qc platform switch')} ${chalk.gray('to switch between platforms')}`);
     }
     
     // Test API call

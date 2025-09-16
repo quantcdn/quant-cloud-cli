@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadAuthConfig } from '../utils/config.js';
+import { getActivePlatformConfig } from '../utils/config.js';
 import { Logger } from '../utils/logger.js';
 
 const logger = new Logger('WhoAmI');
@@ -16,7 +16,7 @@ export function whoamiCommand(program: Command) {
 
 async function handleWhoAmI() {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

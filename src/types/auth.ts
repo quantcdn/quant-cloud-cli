@@ -10,6 +10,18 @@ export interface AuthConfig {
   activeEnvironment?: string;
 }
 
+export interface PlatformInfo {
+  id: string; // 'quantgov' | 'quantcdn' | custom endpoint
+  name: string; // Display name
+  host: string; // API endpoint
+  description?: string;
+}
+
+export interface MultiPlatformConfig {
+  activePlatform?: string;
+  platforms: Record<string, AuthConfig & { platformInfo: PlatformInfo }>;
+}
+
 export interface Organization {
   id: number;
   name: string;

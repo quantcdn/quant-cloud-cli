@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { loadAuthConfig, saveAuthConfig } from '../utils/config.js';
+import { createSpinner } from '../utils/spinner.js';
+import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
 import { UserInfo } from '../types/auth.js';
 import { Logger } from '../utils/logger.js';
 
@@ -32,27 +33,37 @@ export function orgCommand(program: Command) {
 
 async function handleOrgList() {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
       return;
     }
 
-    // Fetch fresh organization data from API
-    const response = await fetch(`${auth.host}/api/oauth/user`, {
-      headers: {
-        'Authorization': `Bearer ${auth.token}`,
-        'Accept': 'application/json'
+    // Fetch fresh organization data from API with spinner
+    const spinner = createSpinner('Loading organizations...');
+    
+    let userInfo: UserInfo;
+    try {
+      const response = await fetch(`${auth.host}/api/oauth/user`, {
+        headers: {
+          'Authorization': `Bearer ${auth.token}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        spinner.fail('Failed to fetch organization data');
+        logger.error('Failed to fetch organization data. Please re-authenticate with `quant-cloud login`.');
+        return;
       }
-    });
 
-    if (!response.ok) {
-      logger.error('Failed to fetch organization data. Please re-authenticate with `quant-cloud login`.');
-      return;
+      userInfo = await response.json() as UserInfo;
+      spinner.succeed('Loaded organizations');
+    } catch (error) {
+      spinner.fail('Failed to load organizations');
+      throw error;
     }
-
-    const userInfo = await response.json() as UserInfo;
     
     if (!userInfo.organizations || userInfo.organizations.length === 0) {
       logger.info('No organizations available.');
@@ -74,11 +85,13 @@ async function handleOrgList() {
     }
 
     // Update stored organizations
-    auth.organizations = userInfo.organizations;
+    const updates: any = {
+      organizations: userInfo.organizations
+    };
     if (!auth.activeOrganization && userInfo.organizations.length > 0) {
-      auth.activeOrganization = userInfo.organizations[0].machine_name;
+      updates.activeOrganization = userInfo.organizations[0].machine_name;
     }
-    await saveAuthConfig(auth);
+    await saveActivePlatformConfig(updates);
 
   } catch (error) {
     logger.error('Failed to list organizations:', error);
@@ -87,7 +100,7 @@ async function handleOrgList() {
 
 async function handleOrgSelect(orgId?: string) {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -134,14 +147,12 @@ async function handleOrgSelect(orgId?: string) {
     }
     
     // Update active organization
-    auth.activeOrganization = targetOrg.machine_name;
-    
-    // Clear application and environment context when switching organizations
-    // since they are scoped to the previous organization
-    auth.activeApplication = undefined;
-    auth.activeEnvironment = undefined;
-    
-    await saveAuthConfig(auth);
+    // Update active organization and clear application/environment context
+    await saveActivePlatformConfig({
+      activeOrganization: targetOrg.machine_name,
+      activeApplication: undefined,
+      activeEnvironment: undefined
+    });
     
     logger.info(`Switched to organization: ${chalk.green(targetOrg.name)} (${chalk.gray(targetOrg.machine_name)})`);
     logger.info(`${chalk.yellow('Note:')} Application and environment context cleared - use ${chalk.cyan('qc app select')} and ${chalk.cyan('qc env select')} to set new context`);
@@ -152,7 +163,7 @@ async function handleOrgSelect(orgId?: string) {
 
 async function handleOrgCurrent() {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

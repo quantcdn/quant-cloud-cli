@@ -1,8 +1,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
+
+inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
 import { createSpinner } from '../utils/spinner.js';
-import { loadAuthConfig, saveAuthConfig } from '../utils/config.js';
+import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { Application } from '../types/auth.js';
@@ -55,7 +58,7 @@ async function handleAppList(options: AppOptions) {
       return;
     }
 
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     logger.info('\nApplications:');
     apps.forEach((app: any, index) => {
@@ -124,16 +127,25 @@ async function handleAppList(options: AppOptions) {
 
 async function handleAppSelect(appId?: string, options?: AppOptions) {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
       return;
     }
 
-    // Get applications
+    // Get applications with spinner
+    const spinner = createSpinner('Loading applications...');
     const client = await ApiClient.create();
-    const apps = await client.getApplications({ organizationId: options?.org });
+    
+    let apps: any[] = [];
+    try {
+      apps = await client.getApplications({ organizationId: options?.org });
+      spinner.succeed('Loaded applications');
+    } catch (error) {
+      spinner.fail('Failed to load applications');
+      throw error;
+    }
     
     if (apps.length === 0) {
       logger.info('No applications available in this organization.');
@@ -177,10 +189,77 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
     // Update active application (and clear environment since it may not exist in new app)
     auth.activeApplication = targetApp.appName;
     auth.activeEnvironment = undefined; // Reset environment when switching apps
-    await saveAuthConfig(auth);
     
     logger.info(`Selected application: ${chalk.green(targetApp.appName)}`);
-    logger.info(`${chalk.gray('Environment context cleared. Use')} ${chalk.cyan('quant-cloud env list')} ${chalk.gray('to see available environments')}`);
+    
+    // Now automatically continue with environment selection
+    const envSpinner = createSpinner('Loading environments...');
+    
+    try {
+      const environments = await client.getEnvironments({ 
+        organizationId: options?.org,
+        applicationId: targetApp.appName
+      });
+      envSpinner.succeed(`Found ${environments.length} environments`);
+      
+      if (environments.length === 0) {
+        logger.info('No environments available in this application.');
+        return;
+      }
+      
+      if (environments.length === 1) {
+        // Auto-select single environment
+        await saveActivePlatformConfig({
+          activeApplication: targetApp.appName,
+          activeEnvironment: environments[0].envName
+        });
+        logger.info(`Auto-selected environment: ${chalk.magenta(environments[0].envName)}`);
+        return;
+      }
+      
+      // Multiple environments - prompt for selection
+      const searchEnvs = (answers: any, input: string = '') => {
+        return new Promise((resolve) => {
+          const filtered = environments.filter((env: any) => 
+            env.envName.toLowerCase().includes(input.toLowerCase())
+          );
+          
+          const choices = filtered.map((env: any) => ({
+            name: `${chalk.magenta(env.envName)} ${chalk.gray(`(${env.runningCount || 0}/${env.desiredCount || 0} running)`)}`,
+            value: env.envName
+          }));
+          
+          resolve(choices);
+        });
+      };
+      
+      const { selectedEnvId } = await inquirer.prompt([
+        {
+          type: 'autocomplete',
+          name: 'selectedEnvId',
+          message: 'Select environment:',
+          source: searchEnvs,
+          pageSize: 10,
+        }
+      ]);
+      
+      // Save the selected application and environment
+      await saveActivePlatformConfig({
+        activeApplication: targetApp.appName,
+        activeEnvironment: selectedEnvId
+      });
+      
+      logger.info(`Selected environment: ${chalk.magenta(selectedEnvId)}`);
+      logger.info(`${chalk.gray('Context:')} ${chalk.green(auth.activeOrganization || 'default')}/${chalk.blue(targetApp.appName)}/${chalk.magenta(selectedEnvId)}`);
+      
+    } catch (envError) {
+      envSpinner.fail('Failed to load environments');
+      logger.warn(`Could not load environments for app '${targetApp.appName}'. Environment context cleared.`);
+      await saveActivePlatformConfig({
+        activeApplication: targetApp.appName,
+        activeEnvironment: undefined
+      });
+    }
     
   } catch (error) {
     logger.error('Failed to switch application:', error);
@@ -189,7 +268,7 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
 
 async function handleAppCurrent() {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -203,9 +282,19 @@ async function handleAppCurrent() {
     }
     
     try {
-      // Get fresh app data from API
+      // Get fresh app data from API with spinner
+      const spinner = createSpinner('Loading application data...');
       const client = await ApiClient.create();
-      const apps = await client.getApplications();
+      
+      let apps: any[] = [];
+      try {
+        apps = await client.getApplications();
+        spinner.succeed('Loaded application data');
+      } catch (error) {
+        spinner.fail('Failed to load application data');
+        throw error;
+      }
+      
       const activeApp = apps.find((a: Application) => a.machine_name === auth.activeApplication);
       
       if (!activeApp) {

@@ -10,7 +10,9 @@ import { whoamiCommand } from './commands/whoami.js';
 import { orgCommand } from './commands/org.js';
 import { appCommand } from './commands/app.js';
 import { envCommand } from './commands/env.js';
-import { loadAuthConfig } from './utils/config.js';
+import { sshCommand } from './commands/ssh.js';
+import { platformCommand } from './commands/platform.js';
+import { getActivePlatformConfig } from './utils/config.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -41,7 +43,7 @@ function displaySlimBanner() {
 
 async function displayContext() {
   try {
-    const auth = await loadAuthConfig();
+    const auth = await getActivePlatformConfig();
     
     if (!auth || !auth.token) {
       console.log(chalk.yellow('⚠ Not authenticated - run ') + chalk.cyan('qc login') + chalk.yellow(' to get started\n'));
@@ -105,6 +107,8 @@ async function main() {
       orgCommand(program);
       appCommand(program);
       envCommand(program);
+      platformCommand(program);
+      program.addCommand(sshCommand);
 
   // Global error handling
   process.on('uncaughtException', (error) => {
