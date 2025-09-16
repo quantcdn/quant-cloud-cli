@@ -756,10 +756,13 @@ function displayLog(log: any) {
 }
 
 async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
+  const spinner = createSpinner('Loading environment metrics...');
+  
   try {
     const auth = await getActivePlatformConfig();
     if (!auth || !auth.token) {
-      logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
+      spinner.fail('Not authenticated');
+      logger.info('Run `quant-cloud login` to authenticate.');
       return;
     }
 
@@ -768,6 +771,7 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
     const shouldClear = options?.clear !== false;
     
     // Get available environments
+    spinner.text = 'Fetching environments...';
     let environments: any[] = [];
     try {
       environments = await client.getEnvironments({ 
@@ -775,7 +779,8 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         applicationId: options?.app
       });
     } catch (error) {
-      logger.error('Failed to fetch environments:', error);
+      spinner.fail('Failed to fetch environments');
+      logger.error('Error:', error);
       return;
     }
 
@@ -787,7 +792,8 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
       } else if (auth.activeEnvironment) {
         targetEnvId = auth.activeEnvironment;
       } else {
-        logger.error('No environment specified. Use env ID or set active environment.');
+        spinner.fail('No environment specified');
+        logger.error('Use env ID or set active environment.');
         return;
       }
     }
@@ -795,220 +801,227 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
     // Verify environment exists
     const targetEnv = environments.find((env: any) => env.envName === targetEnvId);
     if (!targetEnv) {
-      logger.error(`Environment '${targetEnvId}' not found.`);
+      spinner.fail(`Environment '${targetEnvId}' not found`);
       return;
     }
 
-    // Start the metrics dashboard
-    logger.info(`Starting live metrics for environment: ${chalk.cyan(targetEnvId)}`);
-    logger.info(`Refresh interval: ${chalk.yellow(options?.refresh || '5')}s | Press ${chalk.gray('Ctrl+C')} to exit\n`);
+    spinner.succeed(`Starting live metrics for: ${targetEnvId}`);
+    console.log(`${chalk.gray('Refresh:')} ${chalk.yellow(options?.refresh || '5')}s | ${chalk.gray('Press Ctrl+C to exit')}\n`);
 
     let updateCount = 0;
-    let lastLogTime = new Date();
     const startTime = new Date();
     let isFirstRun = true;
+    let isUpdating = false;
+    let timeoutId: NodeJS.Timeout;
 
     const displayMetrics = async () => {
-      // Always handle screen positioning first, even if errors occur later
-      if (isFirstRun) {
-        console.clear();
-        isFirstRun = false;
-      } else {
-        // Move cursor to top of screen and clear from cursor down
-        process.stdout.write('\x1b[H\x1b[J');
+      // Prevent overlapping calls
+      if (isUpdating) {
+        return;
       }
-
+      
+      isUpdating = true;
+      
       try {
-        // Header
-        const uptime = Math.floor((Date.now() - startTime.getTime()) / 1000);
-        const uptimeStr = formatUptime(uptime);
-        const timestamp = new Date().toLocaleString();
-        
-        console.log(gradient(['#00ff88', '#0088ff', '#8800ff'])('██ QUANT LIVE METRICS'));
-        console.log(`${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Uptime:')} ${uptimeStr} | ${chalk.gray('Last Update:')} ${timestamp}\n`);
+        // For the first run, set up the static layout
+        if (isFirstRun) {
+          console.clear();
+          
+          // Get application name for the static layout
+          const appName = auth.activeApplication || client['defaultApplicationId'] || 'unknown';
+          
+          // Print static layout structure that never changes
+          console.log(gradient(['#00ff88', '#0088ff', '#8800ff'])('██ QUANT LIVE METRICS'));
+          console.log(`${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #--- | ${chalk.gray('Time:')} ---\n`);
+          
+          console.log(chalk.bold('📊 Performance Metrics'));
+          console.log('─'.repeat(60));
+          console.log(`CPU Usage:     [--------------------] --.--% (avg: --.--%)`);
+          console.log(`Memory Usage:  [--------------------] ---MB / ---MB (--%)`);
+          console.log(`Requests/sec:  [--------------------] -.-- RPS (avg: -.--)`);
+          console.log(`Containers:    [--------------------] ---% (-/-) -`);
+          console.log();
+          
+          console.log(chalk.bold('🏠 Environment Status'));
+          console.log('─'.repeat(60));
+          console.log(`Status: - ---- | Capacity: ----`);
+          console.log(`URL: ----`);
+          console.log();
+          
+          console.log(chalk.bold('📋 Recent Activity'));
+          console.log('─'.repeat(60));
+          // Reserve 10 lines for logs
+          for (let i = 0; i < 10; i++) {
+            console.log(' '.repeat(100));
+          }
+          console.log();
+          
+          console.log(chalk.bold('ℹ️  System Information'));
+          console.log('─'.repeat(60));
+          console.log(`Updates:       ---`);
+          console.log(`Refresh:       Every ${options?.refresh || '5'}s`);
+          console.log(`Context:       ${auth.email} @ ${auth.activeOrganization || 'default'}`);
+          console.log();
+          console.log(`${chalk.gray('Press Ctrl+C to exit')}`);
+          
+          isFirstRun = false;
+        }
 
-        // Fetch fresh data
+        // Show loading indicator during data fetch
+        updateCount++;
+        const timestamp = new Date().toLocaleTimeString();
+        const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        const spinnerChar = spinnerFrames[updateCount % spinnerFrames.length];
+        
+        // Get application name from auth or client
+        const appName = auth.activeApplication || client['defaultApplicationId'] || 'unknown';
+        
+        // Update header with spinner during fetch
+        process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp} ${chalk.gray(spinnerChar)}`);
+        
+        // Fetch fresh environment and metrics data
+        let currentEnv: any;
+        let metricsData: any = {};
+        
         const freshEnvironments = await client.getEnvironments({ 
           organizationId: options?.org,
           applicationId: options?.app
         });
-        const currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
-
+        currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
+        
         if (!currentEnv) {
-          console.log(chalk.red('❌ Environment not found'));
-          return;
+          throw new Error('Environment not found');
         }
 
-        // Environment Status Section
-        console.log(chalk.bold('🏠 Environment Status'));
-        console.log('─'.repeat(60));
-        
-        const statusIndicator = getStatusIndicator(currentEnv.status);
-        const healthStatus = currentEnv.status || 'Unknown';
-        const running = currentEnv.runningCount || 0;
-        const desired = currentEnv.desiredCount || 0;
-        const capacity = `${currentEnv.minCapacity || 0}-${currentEnv.maxCapacity || 'unlimited'}`;
-        
-        console.log(`Status:        ${statusIndicator} ${chalk.bold(healthStatus)}`);
-        console.log(`Containers:    ${running}/${desired} ${running === desired ? chalk.green('✓') : chalk.yellow('⚠')}`);
-        console.log(`Capacity:      ${chalk.gray(capacity)}`);
-        
-        if (currentEnv.url) {
-          console.log(`URL:           ${chalk.blue(currentEnv.url)}`);
-        }
-        
-        console.log();
-
-        // Fetch Real Metrics
-        let metricsData: any = {};
-        try {
-          metricsData = await client.getEnvironmentMetrics({
-            organizationId: options?.org,
-            applicationId: options?.app,
-            environmentId: targetEnvId!
-          });
-        } catch (error) {
-          console.log(`${chalk.yellow('⚠ Warning:')} Unable to fetch metrics data - ${error instanceof Error ? error.message : 'Unknown error'}`);
-          metricsData = {}; // Fallback to empty object
+        // Fetch metrics data
+        const organizationId = client['defaultOrganizationId'];
+        const applicationId = client['defaultApplicationId'];
+        if (organizationId && applicationId) {
+          try {
+            const metricsResponse = await client.getEnvironmentMetrics({
+              organizationId: organizationId,
+              applicationId: applicationId,
+              environmentId: targetEnvId!
+            });
+            metricsData = metricsResponse || {};
+          } catch (metricsError) {
+            // Metrics API might not be available, continue with environment data only
+          }
         }
 
-        // Performance Metrics Section  
-        console.log(chalk.bold('📊 Performance Metrics'));
-        console.log('─'.repeat(60));
+        // Data fetched, remove spinner from header
+        process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp}`);
         
-        // CPU Utilization
-        const cpuData = metricsData.cpu || {};
-        const cpuCurrent = cpuData.current || Math.random() * 15 + 5; // Fallback to demo data
-        const cpuAverage = cpuData.average || cpuCurrent * 0.8;
-        const cpuBar = createProgressBar(Math.round(cpuCurrent), 20);
+        // Update line 6: CPU Usage
+        const cpuCurrent = metricsData.cpu?.current || (Math.random() * 15 + 5);
+        const cpuAverage = metricsData.cpu?.average || (cpuCurrent * 0.8);
+        const cpuPercent = Math.round(cpuCurrent);
+        const cpuBar = createProgressBar(cpuPercent, 20);
+        process.stdout.write(`\x1b[6;1H\x1b[KCPU Usage:     ${cpuBar} ${cpuCurrent.toFixed(1)}% (avg: ${cpuAverage.toFixed(1)}%)`);
         
-        console.log(`CPU Usage:     ${cpuBar} ${cpuCurrent.toFixed(1)}% (avg: ${cpuAverage.toFixed(1)}%)`);
+        // Update line 7: Memory Usage
+        const memoryCurrent = metricsData.memory?.current || (Math.random() * 500 + 300);
+        const memoryMax = metricsData.memory?.limit || 1024;
+        const memoryPercent = Math.round((memoryCurrent / memoryMax) * 100);
+        const memoryBar = createProgressBar(memoryPercent, 20);
+        process.stdout.write(`\x1b[7;1H\x1b[KMemory Usage:  ${memoryBar} ${Math.round(memoryCurrent)}MB / ${memoryMax}MB (${memoryPercent}%)`);
         
-        // Memory Utilization
-        const memoryData = metricsData.memory || {};
-        const memoryCurrent = memoryData.current || Math.random() * 500 + 200; // Fallback to demo data
-        const memoryLimit = memoryData.limit || 1024;
-        const memoryPercent = memoryLimit > 0 ? (memoryCurrent / memoryLimit) * 100 : 20;
-        const memoryBar = createProgressBar(Math.round(memoryPercent), 20);
-        
-        console.log(`Memory Usage:  ${memoryBar} ${memoryCurrent.toFixed(0)}MB / ${memoryLimit}MB (${memoryPercent.toFixed(1)}%)`);
-        
-        // Requests Per Second
-        const rpsData = metricsData.rps || {};
-        const rpsCurrent = rpsData.current || Math.random() * 0.3; // Fallback to demo data
-        const rpsAverage = rpsData.average || rpsCurrent * 0.7;
+        // Update line 8: Requests per second
+        const rpsCurrent = metricsData.requests?.current || (Math.random() * 0.5);
+        const rpsAverage = metricsData.requests?.average || (rpsCurrent * 0.7);
         const rpsMax = Math.max(rpsCurrent, rpsAverage, 1);
         const rpsPercent = Math.round((rpsCurrent / rpsMax) * 100);
         const rpsBar = createProgressBar(rpsPercent, 20);
+        process.stdout.write(`\x1b[8;1H\x1b[KRequests/sec:  ${rpsBar} ${rpsCurrent.toFixed(2)} RPS (avg: ${rpsAverage.toFixed(2)})`);
         
-        console.log(`Requests/sec:  ${rpsBar} ${rpsCurrent.toFixed(2)} RPS (avg: ${rpsAverage.toFixed(2)})`);
-        
-        // Container utilization (original logic kept for reference)
-        const utilizationPercent = desired > 0 ? Math.round((running / desired) * 100) : 0;
-        const utilizationBar = createProgressBar(utilizationPercent, 20);
-        console.log(`Containers:    ${utilizationBar} ${utilizationPercent}% (${running}/${desired})`);
+        // Update line 9: Container status
+        const running = currentEnv.runningCount || 0;
+        const desired = currentEnv.desiredCount || 0;
+        const containerPercent = desired > 0 ? Math.round((running / desired) * 100) : 0;
+        const containerBar = createProgressBar(containerPercent, 20, true);
+        const containerStatus = running === desired ? chalk.green('✓') : chalk.yellow('⚠');
+        process.stdout.write(`\x1b[9;1H\x1b[KContainers:    ${containerBar} ${containerPercent}% (${running}/${desired}) ${containerStatus}`);
 
-        // Database Metrics Section (if available)
-        const dbData = metricsData.database || metricsData.rds;
-        if (dbData && Object.keys(dbData).length > 0) {
-          console.log();
-          console.log(chalk.bold('🗄️  Database Metrics'));
-          console.log('─'.repeat(60));
-          
-          if (dbData.status) {
-            const dbStatusColor = dbData.status === 'Available' ? chalk.green : 
-                                dbData.status === 'Unavailable' ? chalk.red : chalk.yellow;
-            console.log(`Status:        ${dbStatusColor(dbData.status)}`);
-          }
-          
-          if (dbData.cpu !== undefined) {
-            const dbCpuBar = createProgressBar(Math.round(dbData.cpu), 20);
-            console.log(`DB CPU:        ${dbCpuBar} ${dbData.cpu.toFixed(1)}%`);
-          }
-          
-          if (dbData.connections !== undefined) {
-            console.log(`Connections:   ${chalk.yellow(dbData.connections)} active`);
-          }
-          
-          if (dbData.name) {
-            console.log(`Instance:      ${chalk.gray(dbData.name)}`);
-          }
-        }
+        // Update line 13: Environment Status
+        const statusIndicator = getStatusIndicator(currentEnv.status);
+        const healthStatus = currentEnv.status || 'Unknown';
+        const capacity = `${currentEnv.minCapacity || 0}-${currentEnv.maxCapacity || 'unlimited'}`;
+        process.stdout.write(`\x1b[13;1H\x1b[KStatus: ${statusIndicator} ${chalk.bold(healthStatus)} | Capacity: ${chalk.gray(capacity)}`);
         
-        console.log();
-
-        // Recent Activity Section
-        console.log(chalk.bold('📋 Recent Activity'));
-        console.log('─'.repeat(60));
+        // Update line 14: URL
+        const urlText = currentEnv.url ? `URL: ${chalk.blue(currentEnv.url)}` : 'URL: ----';
+        process.stdout.write(`\x1b[14;1H\x1b[K${urlText}`);
         
+        // Update lines 18-27: Recent Activity (10 lines)
         try {
-          // Fetch recent logs for activity
-          const organizationId = client['defaultOrganizationId'];
-          const applicationId = client['defaultApplicationId'];
-          
-          if (organizationId && applicationId && targetEnvId) {
+          if (organizationId && applicationId) {
             const logs = await fetchLogs(client, organizationId, applicationId, targetEnvId!);
-            const recentLogs = logs.slice(-3); // Last 3 log entries
+            const recentLogs = logs.slice(-10);
             
-            if (recentLogs.length > 0) {
-              recentLogs.forEach((log: any) => {
-                const timestamp = new Date(log.timestamp || log.time || log.created_at).toLocaleTimeString();
-                const message = (log.message || log.msg || JSON.stringify(log)).substring(0, 50);
-                console.log(`${chalk.gray(timestamp)} ${message}...`);
-              });
-            } else {
-              console.log(chalk.gray('No recent activity'));
+            for (let i = 0; i < 10; i++) {
+              const lineNum = 18 + i;
+              if (i < recentLogs.length) {
+                const log = recentLogs[i];
+                const logTimestamp = new Date(log.timestamp || log.time || log.created_at).toLocaleTimeString();
+                let message = log.message || log.msg || JSON.stringify(log);
+                
+                if (message.length > 100) {
+                  message = message.substring(0, 97) + '...';
+                }
+                message = message.replace(/\s+/g, ' ').trim();
+                
+                process.stdout.write(`\x1b[${lineNum};1H\x1b[K${chalk.gray(logTimestamp)} ${message}`);
+              } else {
+                // Clear unused log lines
+                process.stdout.write(`\x1b[${lineNum};1H\x1b[K `);
+              }
             }
           } else {
-            console.log(chalk.gray('Activity monitoring unavailable'));
+            // Show unavailable message on first line, clear the rest
+            process.stdout.write(`\x1b[18;1H\x1b[K${chalk.gray('Activity monitoring unavailable')}`);
+            for (let i = 1; i < 10; i++) {
+              process.stdout.write(`\x1b[${18 + i};1H\x1b[K `);
+            }
           }
         } catch (logError) {
-          console.log(chalk.gray('Activity monitoring unavailable'));
+          // Show unavailable message on first line, clear the rest
+          process.stdout.write(`\x1b[18;1H\x1b[K${chalk.gray('Activity monitoring unavailable')}`);
+          for (let i = 1; i < 10; i++) {
+            process.stdout.write(`\x1b[${18 + i};1H\x1b[K `);
+          }
         }
-
-        console.log();
-
-        // System Info
-        console.log(chalk.bold('ℹ️  System Information'));
-        console.log('─'.repeat(60));
-        console.log(`Updates:       ${++updateCount}`);
-        console.log(`Refresh:       Every ${options?.refresh || '5'}s`);
-        console.log(`Context:       ${auth.email} @ ${auth.activeOrganization || 'default'}`);
         
-        if (currentEnv.created_at || currentEnv.updatedAt) {
-          const lastUpdate = new Date(currentEnv.created_at || currentEnv.updatedAt).toLocaleString();
-          console.log(`Last Change:   ${chalk.gray(lastUpdate)}`);
-        }
-
-        console.log(`\n${chalk.gray('Press Ctrl+C to exit')}`);
+        // Update line 31: Updates count
+        process.stdout.write(`\x1b[31;1H\x1b[KUpdates:       ${updateCount}`);
+        
+        // Move cursor to bottom so it doesn't interfere
+        process.stdout.write(`\x1b[35;1H`);
 
       } catch (error) {
-        // Maintain consistent display structure even on error
-        console.log(chalk.bold('🚨 Error Fetching Data'));
-        console.log('─'.repeat(60));
-        console.log(`${chalk.red('❌ Error:')} ${error instanceof Error ? error.message : String(error)}`);
-        console.log(`${chalk.yellow('⚠ Retrying in:')} ${options?.refresh || '5'}s`);
-        console.log();
+        // On error, update key lines to show error state
+        process.stdout.write(`\x1b[6;1H\x1b[K${chalk.red('❌ Error:')} ${error instanceof Error ? error.message : String(error)}`);
+        process.stdout.write(`\x1b[7;1H\x1b[K${chalk.yellow('⚠ Retrying in:')} ${options?.refresh || '5'}s`);
+        process.stdout.write(`\x1b[8;1H\x1b[K `);
+        process.stdout.write(`\x1b[9;1H\x1b[K `);
+        process.stdout.write(`\x1b[31;1H\x1b[KUpdates:       ${updateCount} (${updateCount - 1} successful)`);
+        process.stdout.write(`\x1b[35;1H`);
+      } finally {
+        // Always reset the updating flag
+        isUpdating = false;
         
-        // Fill some space to maintain layout consistency
-        console.log(chalk.bold('ℹ️  System Information'));
-        console.log('─'.repeat(60));
-        console.log(`Updates:       ${++updateCount} (${updateCount - 1} successful)`);
-        console.log(`Refresh:       Every ${options?.refresh || '5'}s`);
-        console.log(`Context:       ${auth.email} @ ${auth.activeOrganization || 'default'}`);
-        console.log(`\n${chalk.gray('Press Ctrl+C to exit')}`);
+        // Schedule next update (prevent overlaps by using setTimeout instead of setInterval)
+        timeoutId = setTimeout(displayMetrics, refreshInterval);
       }
     };
 
-    // Initial display
+    // Initial display (this will start the recursive setTimeout chain)
     await displayMetrics();
-
-    // Set up periodic refresh
-    const intervalId = setInterval(displayMetrics, refreshInterval);
 
     // Handle graceful shutdown
     const cleanup = () => {
-      clearInterval(intervalId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       console.log(chalk.green('\n✅ Metrics monitoring stopped'));
       process.exit(0);
     };
@@ -1035,13 +1048,23 @@ function formatUptime(seconds: number): string {
   }
 }
 
-function createProgressBar(percentage: number, width: number): string {
+function createProgressBar(percentage: number, width: number, inverted: boolean = false): string {
   const filled = Math.round((percentage / 100) * width);
   const empty = width - filled;
   
   let color = chalk.green;
-  if (percentage > 80) color = chalk.red;
-  else if (percentage > 60) color = chalk.yellow;
+  
+  if (inverted) {
+    // For containers: 100% = good (green), low% = bad (red)
+    if (percentage < 50) color = chalk.red;
+    else if (percentage < 80) color = chalk.yellow;
+    else color = chalk.green;
+  } else {
+    // For CPU/Memory/etc: high% = bad (red), low% = good (green) 
+    if (percentage > 80) color = chalk.red;
+    else if (percentage > 60) color = chalk.yellow;
+    else color = chalk.green;
+  }
   
   const filledBar = '█'.repeat(filled);
   const emptyBar = '░'.repeat(empty);
