@@ -4,10 +4,14 @@ Command-line interface for Quant Cloud Platform integration and management.
 
 ## Features
 
+- **Multi-Platform Authentication** - Support for multiple Quant Cloud environments with platform switching
+- **Organization Management** - List and switch between organizations
+- **Application Management** - Create, list, and manage applications with environment auto-selection
+- **Environment Operations** - Create, select, monitor, and manage cloud environments
+- **Live Metrics Dashboard** - Real-time performance monitoring with in-place updates
+- **Log Streaming** - Live log tailing with follow mode
+- **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec
 - **Secure OAuth Authentication** - Browser-based login flow with PKCE security
-- **Clean Terminal Interface** - Intuitive command structure and clear output
-- **Fast & Lightweight** - Built with performance in mind
-- **Extensible Architecture** - Easy to add new commands and features
 
 ## Installation
 
@@ -24,42 +28,71 @@ npx @quantcdn/quant-cloud-cli
 
 1. **Login to Quant Cloud:**
    ```bash
-   quant-cloud login
-   # OR use the short alias:
    qc login
    ```
-   This will open your browser and guide you through the authentication process.
+   Select your platform (QuantGov Cloud or Quant Cloud), authenticate via browser.
 
 2. **Check authentication status:**
    ```bash
-   quant-cloud whoami
-   # OR:
    qc whoami
+   ```
+
+3. **Set up your context:**
+   ```bash
+   qc org select          # Choose organization
+   qc app select          # Choose application (auto-prompts for environment)
+   ```
+
+4. **Start monitoring:**
+   ```bash
+   qc env metrics         # Live dashboard
+   qc env logs --follow   # Stream logs
+   qc ssh                 # Access environment
    ```
 
 ## Commands
 
 ### Authentication
-- `quant-cloud login` / `qc login` - Authenticate with Quant Cloud Platform
-- `quant-cloud logout` / `qc logout` - Sign out and clear stored credentials
-- `quant-cloud whoami` / `qc whoami` - Display current user information
+- `qc login` - Authenticate with Quant Cloud Platform (supports multiple platforms)
+- `qc logout` - Sign out and clear stored credentials
+- `qc whoami` - Display current user and authentication status
 
-### Applications (Coming Soon)
-- `quant-cloud apps list` / `qc apps list` - List all your applications
-- `quant-cloud apps create <name>` / `qc apps create <name>` - Create a new application
-- `quant-cloud apps deploy <app>` / `qc apps deploy <app>` - Deploy an application
+### Platform Management
+- `qc platform list` - List all authenticated platforms
+- `qc platform switch` - Switch between authenticated platforms
+- `qc platform current` - Show currently active platform
+- `qc platform remove` - Remove platform authentication
 
-### Environments (Coming Soon)
-- `quant-cloud env list` / `qc env list` - List all environments
-- `quant-cloud env create <name>` / `qc env create <name>` - Create a new environment
-- `quant-cloud env delete <name>` / `qc env delete <name>` - Delete an environment
+### Organizations
+- `qc org list` - List available organizations
+- `qc org select [orgId]` - Switch to a different organization
+- `qc org current` - Show current organization
+
+### Applications
+- `qc app list` - List applications in current organization
+- `qc app select [appId]` - Switch to application (auto-prompts for environment)
+- `qc app current` - Show current application context
+
+### Environments
+- `qc env list` - List environments in current application
+- `qc env select [envId]` - Switch to environment with searchable selection
+- `qc env current` - Show current environment
+- `qc env create [envName]` - Create new environment with capacity settings
+- `qc env state [envId]` - Get environment deployment state
+- `qc env logs [envId]` - Stream environment logs (supports --follow)
+- `qc env metrics [envId]` - Live metrics dashboard with real-time updates
+
+### SSH Access
+- `qc ssh [--container=name]` - SSH into cloud environment via AWS ECS Exec
 
 ## Configuration
 
 The CLI stores configuration in `~/.quant/credentials`. This includes:
-- Authentication tokens
-- Default host settings
-- User preferences
+- Multi-platform authentication tokens and refresh tokens
+- Active platform, organization, application, and environment context
+- Platform-specific settings and preferences
+
+Configuration is automatically migrated from single-platform to multi-platform format when upgrading.
 
 ## Development
 
