@@ -12,6 +12,7 @@ import { appCommand } from './commands/app.js';
 import { envCommand } from './commands/env.js';
 import { sshCommand } from './commands/ssh.js';
 import { platformCommand } from './commands/platform.js';
+import { backupCommand } from './commands/backup.js';
 import { getActivePlatformConfig } from './utils/config.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -109,6 +110,7 @@ async function main() {
       envCommand(program);
       platformCommand(program);
       program.addCommand(sshCommand);
+      program.addCommand(backupCommand(program));
 
   // Global error handling
   process.on('uncaughtException', (error) => {

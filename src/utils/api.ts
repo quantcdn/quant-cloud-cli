@@ -1,6 +1,6 @@
 import { getActivePlatformConfig } from './config.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -14,6 +14,7 @@ export class ApiClient {
   private applicationsApi: ApplicationsApi;
   public environmentsApi: EnvironmentsApi;
   public sshAccessApi: SSHAccessApi;
+  public backupManagementApi: BackupManagementApi;
   public baseUrl: string;
   private defaultOrganizationId?: string;
   private defaultApplicationId?: string;
@@ -25,6 +26,7 @@ export class ApiClient {
     this.applicationsApi = new ApplicationsApi(`${baseUrl}/api/v3`);
     this.environmentsApi = new EnvironmentsApi(`${baseUrl}/api/v3`);
     this.sshAccessApi = new SSHAccessApi(`${baseUrl}/api/v3`);
+    this.backupManagementApi = new BackupManagementApi(`${baseUrl}/api/v3`);
     
     this.baseUrl = baseUrl;
     this.token = token;
@@ -45,6 +47,7 @@ export class ApiClient {
     this.applicationsApi.defaultHeaders = defaultHeaders;
     this.environmentsApi.defaultHeaders = defaultHeaders;
     this.sshAccessApi.defaultHeaders = defaultHeaders;
+    this.backupManagementApi.defaultHeaders = defaultHeaders;
   }
 
   static async create(): Promise<ApiClient> {

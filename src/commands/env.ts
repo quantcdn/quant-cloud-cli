@@ -838,8 +838,8 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
           console.log('─'.repeat(60));
           console.log(`CPU Usage:     [--------------------] --.--% (avg: --.--%)`);
           console.log(`Memory Usage:  [--------------------] ---MB / ---MB (--%)`);
-          console.log(`Requests/sec:  [--------------------] -.-- RPS (avg: -.--)`);
-          console.log(`Containers:    [--------------------] ---% (-/-) -`);
+              console.log(`Requests/sec:  -.-- RPS (avg: -.--) ○ ----`);
+              console.log(`Containers:    [--------------------] ---% (-/-) -`);
           console.log();
           
           console.log(chalk.bold('🏠 Environment Status'));
@@ -913,33 +913,50 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp}`);
         
         // Update line 6: CPU Usage
-        const cpuCurrent = metricsData.cpu?.current || (Math.random() * 15 + 5);
-        const cpuAverage = metricsData.cpu?.average || (cpuCurrent * 0.8);
-        const cpuPercent = Math.round(cpuCurrent);
+        const cpuCurrent = Math.max(0, metricsData.cpu?.current || (Math.random() * 15 + 5));
+        const cpuAverage = Math.max(0, metricsData.cpu?.average || (cpuCurrent * 0.8));
+        const cpuPercent = Math.min(100, Math.round(cpuCurrent)); // Cap CPU at 100% for display
         const cpuBar = createProgressBar(cpuPercent, 20);
         process.stdout.write(`\x1b[6;1H\x1b[KCPU Usage:     ${cpuBar} ${cpuCurrent.toFixed(1)}% (avg: ${cpuAverage.toFixed(1)}%)`);
         
         // Update line 7: Memory Usage
-        const memoryCurrent = metricsData.memory?.current || (Math.random() * 500 + 300);
-        const memoryMax = metricsData.memory?.limit || 1024;
-        const memoryPercent = Math.round((memoryCurrent / memoryMax) * 100);
+        const memoryCurrent = Math.max(0, metricsData.memory?.current || (Math.random() * 500 + 300));
+        const memoryMax = Math.max(1, metricsData.memory?.limit || 1024); // Ensure memoryMax is at least 1 to prevent division by zero
+        const memoryPercent = Math.min(100, Math.round((memoryCurrent / memoryMax) * 100)); // Cap memory at 100% for display
         const memoryBar = createProgressBar(memoryPercent, 20);
         process.stdout.write(`\x1b[7;1H\x1b[KMemory Usage:  ${memoryBar} ${Math.round(memoryCurrent)}MB / ${memoryMax}MB (${memoryPercent}%)`);
         
         // Update line 8: Requests per second
-        const rpsCurrent = metricsData.requests?.current || (Math.random() * 0.5);
-        const rpsAverage = metricsData.requests?.average || (rpsCurrent * 0.7);
-        const rpsMax = Math.max(rpsCurrent, rpsAverage, 1);
-        const rpsPercent = Math.round((rpsCurrent / rpsMax) * 100);
-        const rpsBar = createProgressBar(rpsPercent, 20);
-        process.stdout.write(`\x1b[8;1H\x1b[KRequests/sec:  ${rpsBar} ${rpsCurrent.toFixed(2)} RPS (avg: ${rpsAverage.toFixed(2)})`);
+        const rpsCurrent = Math.max(0, metricsData.requests?.current || (Math.random() * 0.5));
+        const rpsAverage = Math.max(0, metricsData.requests?.average || (rpsCurrent * 0.7));
+        
+        // Activity indicator based on RPS level
+        let activityIndicator;
+        if (rpsCurrent === 0) {
+          activityIndicator = chalk.gray('○ idle');
+        } else if (rpsCurrent < 1) {
+          activityIndicator = chalk.green('◐ low');
+        } else if (rpsCurrent < 10) {
+          activityIndicator = chalk.yellow('● moderate');
+        } else {
+          activityIndicator = chalk.red('◉ high');
+        }
+        
+        process.stdout.write(`\x1b[8;1H\x1b[KRequests/sec:  ${rpsCurrent.toFixed(2)} RPS (avg: ${rpsAverage.toFixed(2)}) ${activityIndicator}`);
         
         // Update line 9: Container status
-        const running = currentEnv.runningCount || 0;
-        const desired = currentEnv.desiredCount || 0;
+        const running = Math.max(0, currentEnv.runningCount || 0);
+        const desired = Math.max(0, currentEnv.desiredCount || 0);
         const containerPercent = desired > 0 ? Math.round((running / desired) * 100) : 0;
         const containerBar = createProgressBar(containerPercent, 20, true);
-        const containerStatus = running === desired ? chalk.green('✓') : chalk.yellow('⚠');
+        let containerStatus;
+        if (running === desired) {
+          containerStatus = chalk.green('✓');
+        } else if (running > desired) {
+          containerStatus = chalk.blue('⟲'); // Deployment/scaling in progress
+        } else {
+          containerStatus = chalk.yellow('⚠');
+        }
         process.stdout.write(`\x1b[9;1H\x1b[KContainers:    ${containerBar} ${containerPercent}% (${running}/${desired}) ${containerStatus}`);
 
         // Update line 13: Environment Status
@@ -1049,20 +1066,23 @@ function formatUptime(seconds: number): string {
 }
 
 function createProgressBar(percentage: number, width: number, inverted: boolean = false): string {
-  const filled = Math.round((percentage / 100) * width);
-  const empty = width - filled;
+  // Clamp percentage to prevent negative values, but allow >100% for containers during deployments
+  const clampedPercentage = Math.max(0, percentage);
+  const filled = Math.min(Math.round((clampedPercentage / 100) * width), width); // Cap filled bars at width
+  const empty = Math.max(0, width - filled);
   
   let color = chalk.green;
   
   if (inverted) {
-    // For containers: 100% = good (green), low% = bad (red)
-    if (percentage < 50) color = chalk.red;
-    else if (percentage < 80) color = chalk.yellow;
+    // For containers: 100% = good (green), >100% = deployment (blue), low% = bad (red)
+    if (clampedPercentage > 100) color = chalk.blue; // Deployment in progress
+    else if (clampedPercentage < 50) color = chalk.red;
+    else if (clampedPercentage < 80) color = chalk.yellow;
     else color = chalk.green;
   } else {
     // For CPU/Memory/etc: high% = bad (red), low% = good (green) 
-    if (percentage > 80) color = chalk.red;
-    else if (percentage > 60) color = chalk.yellow;
+    if (clampedPercentage > 80) color = chalk.red;
+    else if (clampedPercentage > 60) color = chalk.yellow;
     else color = chalk.green;
   }
   
