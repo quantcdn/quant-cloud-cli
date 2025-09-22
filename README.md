@@ -11,6 +11,7 @@ Command-line interface for Quant Cloud Platform integration and management.
 - **Live Metrics Dashboard** - Real-time performance monitoring with in-place updates
 - **Log Streaming** - Live log tailing with follow mode
 - **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec
+- **Backup Management** - Create, list, download, and delete environment backups
 - **Secure OAuth Authentication** - Browser-based login flow with PKCE security
 
 ## Installation
@@ -48,6 +49,7 @@ npx @quantcdn/quant-cloud-cli
    qc env metrics         # Live dashboard
    qc env logs --follow   # Stream logs
    qc ssh                 # Access environment
+   qc backup list         # View backups
    ```
 
 ## Commands
@@ -84,6 +86,12 @@ npx @quantcdn/quant-cloud-cli
 
 ### SSH Access
 - `qc ssh [--container=name]` - SSH into cloud environment via AWS ECS Exec
+
+### Backup Management
+- `qc backup list [--type=database|filesystem]` - List available backups with status and details
+- `qc backup create [--type=database|filesystem]` - Create new backup with interactive prompts
+- `qc backup download [--output=path]` - Download backup files to local directory
+- `qc backup delete` - Delete backups with confirmation prompt
 
 ## Configuration
 
