@@ -159,19 +159,46 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
     
     let targetAppId = appId;
     
-    // If no appId provided, show interactive selection
+    // If no appId provided, show interactive selection with search
     if (!targetAppId) {
+      const appChoices = apps.map((app: any) => {
+        const isCurrent = app.appName === auth.activeApplication;
+        return {
+          name: `${app.appName}${isCurrent ? chalk.green(' - current') : ''}`,
+          value: app.appName
+        };
+      });
+
       const { selectedAppId } = await inquirer.prompt([
         {
-          type: 'list',
+          type: 'autocomplete',
           name: 'selectedAppId',
-          message: 'Select application:',
-          choices: apps.map((app: any) => ({
-            name: `${app.appName} ${app.appName === auth.activeApplication ? chalk.green('- current') : ''}`,
-            value: app.appName
-          }))
+          message: 'Select application (type to filter):',
+          source: async (answersSoFar: any, input: string) => {
+            if (!input) {
+              return appChoices;
+            }
+            
+            // Filter applications based on user input
+            const filtered = appChoices.filter((choice: any) => 
+              choice.value.toLowerCase().includes(input.toLowerCase())
+            );
+            
+            return filtered.length > 0 ? filtered : [
+              { name: chalk.red(`No applications matching "${input}"`), value: null, disabled: true }
+            ];
+          },
+          pageSize: 10,
+          searchText: 'Searching...',
+          emptyText: 'No applications found'
         }
       ]);
+      
+      if (!selectedAppId) {
+        logger.info('No application selected.');
+        return;
+      }
+      
       targetAppId = selectedAppId;
     }
     

@@ -10,7 +10,7 @@ Command-line interface for Quant Cloud Platform integration and management.
 - **Environment Operations** - Create, select, monitor, and manage cloud environments
 - **Live Metrics Dashboard** - Real-time performance monitoring with in-place updates
 - **Log Streaming** - Live log tailing with follow mode
-- **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec
+- **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec with interactive shells and one-shot commands
 - **Backup Management** - Create, list, download, and delete environment backups
 - **Secure OAuth Authentication** - Browser-based login flow with PKCE security
 
@@ -48,7 +48,7 @@ npx @quantcdn/quant-cloud-cli
    ```bash
    qc env metrics         # Live dashboard
    qc env logs --follow   # Stream logs
-   qc ssh                 # Access environment
+   qc ssh                 # Interactive bash shell
    qc backup list         # View backups
    ```
 
@@ -85,7 +85,26 @@ npx @quantcdn/quant-cloud-cli
 - `qc env metrics [envId]` - Live metrics dashboard with real-time updates
 
 ### SSH Access
-- `qc ssh [--container=name]` - SSH into cloud environment via AWS ECS Exec
+- `qc ssh [--container=name]` - SSH into cloud environment via AWS ECS Exec (defaults to interactive bash)
+- `qc ssh --command="shell_or_command"` - Run specific shell or one-shot command (non-interactive by default)
+- `qc ssh --command="command" --interactive` - Run command in interactive mode
+
+**Examples:**
+```bash
+# Interactive bash shell (default)
+qc ssh --container=php
+
+# One-shot commands
+qc ssh --container=php --command="php -v"
+qc ssh --container=php --command="ls -la /var/www"
+
+# Interactive with specific shell
+qc ssh --container=php --command="/bin/sh" --interactive
+qc ssh --container=php --command="/bin/zsh" --interactive
+
+# Interactive command (like database console)
+qc ssh --container=php --command="mysql -u root -p" --interactive
+```
 
 ### Backup Management
 - `qc backup list [--type=database|filesystem]` - List available backups with status and details

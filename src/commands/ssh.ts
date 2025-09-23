@@ -12,6 +12,8 @@ interface SSHOptions {
   org?: string;
   app?: string;
   env?: string;
+  command?: string;
+  interactive?: boolean;
 }
 
 // Use the generated TypeScript client response type
@@ -23,6 +25,8 @@ export const sshCommand = new Command('ssh')
   .option('--org <org>', 'organization machine name')
   .option('--app <app>', 'application machine name') 
   .option('--env <env>', 'environment name')
+  .option('--command <cmd>', 'command to run (default: /bin/bash for interactive shell)')
+  .option('--interactive', 'force interactive mode (only needed with --command)')
   .action(handleSSH);
 
 async function handleSSH(options: SSHOptions) {
@@ -131,7 +135,7 @@ async function handleSSH(options: SSHOptions) {
     console.log();
 
     // Execute AWS CLI command
-    await executeAWSCommand(sshAccess, containerName);
+    await executeAWSCommand(sshAccess, containerName, options.command, options.interactive);
 
   } catch (error: any) {
     spinner.fail(`SSH connection failed: ${error.message || String(error)}`);
@@ -154,7 +158,7 @@ async function checkAWSCLI(): Promise<boolean> {
 }
 
 
-async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: string): Promise<void> {
+async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: string, command?: string, forceInteractive?: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!sshAccess.credentials) {
       reject(new Error('No credentials available'));
@@ -169,15 +173,35 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
       AWS_DEFAULT_REGION: sshAccess.region || 'us-east-1'
     };
 
+    // Logic:
+    // - No command: default to /bin/bash and interactive
+    // - With command: non-interactive by default
+    // - With command + --interactive: interactive
+    const targetCommand = command || '/bin/bash';
+    const isInteractive = !command || forceInteractive;
+    
+    if (command) {
+      if (forceInteractive) {
+        console.log(chalk.gray(`Running interactive command: ${targetCommand}`));
+      } else {
+        console.log(chalk.gray(`Running command: ${targetCommand}`));
+      }
+    } else {
+      console.log(chalk.gray('Starting interactive bash shell...'));
+    }
+
     const args = [
       'ecs', 'execute-command',
       '--cluster', sshAccess.clusterName || '',
       '--task', sshAccess.taskArn || '',
       '--container', containerName,
-      '--interactive',
-      '--command', '/bin/bash'
+      '--command', targetCommand
     ];
 
+    // Add --interactive based on our logic
+    if (isInteractive) {
+      args.splice(-2, 0, '--interactive');
+    }
 
     const child = spawn('aws', args, { 
       env,
@@ -188,9 +212,9 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
     child.on('close', (code) => {
       console.log();
       if (code === 0) {
-        console.log(chalk.green('✅ SSH session ended successfully'));
+        console.log(chalk.green('✅ Command completed successfully'));
       } else {
-        console.log(chalk.yellow(`⚠ SSH session ended with code ${code}`));
+        console.log(chalk.yellow(`⚠ Command ended with code ${code}`));
       }
       resolve();
     });
