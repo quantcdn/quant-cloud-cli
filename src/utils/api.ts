@@ -22,11 +22,16 @@ export class ApiClient {
   private token: string;
 
   constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string) {
-    // Configure the APIs
-    this.applicationsApi = new ApplicationsApi(`${baseUrl}/api/v3`);
-    this.environmentsApi = new EnvironmentsApi(`${baseUrl}/api/v3`);
-    this.sshAccessApi = new SSHAccessApi(`${baseUrl}/api/v3`);
-    this.backupManagementApi = new BackupManagementApi(`${baseUrl}/api/v3`);
+    if (baseUrl.endsWith('/api/v3')) {
+      // Backwards compatibility for old baseUrl.
+      baseUrl = baseUrl.replace('/api/v3', '');
+    }
+
+    // Configure the APIs - SDK now handles /api/v3 internally
+    this.applicationsApi = new ApplicationsApi(baseUrl);
+    this.environmentsApi = new EnvironmentsApi(baseUrl);
+    this.sshAccessApi = new SSHAccessApi(baseUrl);
+    this.backupManagementApi = new BackupManagementApi(baseUrl);
     
     this.baseUrl = baseUrl;
     this.token = token;
@@ -111,7 +116,7 @@ export class ApiClient {
   async getUserInfo(): Promise<any> {
     // OAuth user info is fetched directly, not through the TypeScript client
     // This endpoint is not part of the v3 API, it's part of the OAuth system
-    const response = await fetch(`${this.applicationsApi.basePath.replace('/api/v3', '')}/api/oauth/user`, {
+    const response = await fetch(`${this.baseUrl}/api/oauth/user`, {
       headers: {
         'Authorization': `Bearer ${this.token}`,
         'Accept': 'application/json'
