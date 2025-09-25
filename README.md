@@ -5,6 +5,7 @@ Command-line interface for Quant Cloud Platform integration and management.
 ## Features
 
 - **Multi-Platform Authentication** - Support for multiple Quant Cloud environments with platform switching
+- **Project Configuration** - Automatic context detection with `.quant.yml` files for seamless project workflows
 - **Organization Management** - List and switch between organizations
 - **Application Management** - Create, list, and manage applications with environment auto-selection
 - **Environment Operations** - Create, select, monitor, and manage cloud environments
@@ -13,6 +14,7 @@ Command-line interface for Quant Cloud Platform integration and management.
 - **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec with interactive shells and one-shot commands
 - **Backup Management** - Create, list, download, and delete environment backups
 - **Secure OAuth Authentication** - Browser-based login flow with PKCE security
+- **Non-Interactive Mode** - All commands support context overrides via CLI flags for automation
 
 ## Installation
 
@@ -52,6 +54,45 @@ npx @quantcdn/quant-cloud-cli
    qc backup list         # View backups
    ```
 
+## Project Configuration
+
+For project-specific workflows, create a `.quant.yml` file at your project root:
+
+```yaml
+# .quant.yml - Project configuration
+platform: quantcdn      # or quantgov
+org: my-organization
+app: my-application
+env: development        # default environment
+```
+
+The CLI automatically detects this file when run from anywhere in your project directory tree, eliminating the need to specify context repeatedly.
+
+### Context Priority
+
+The CLI resolves context in this priority order:
+1. **CLI flags** (highest) - `--org`, `--app`, `--env`, `--platform`
+2. **Project config** (`.quant.yml`)
+3. **Stored config** (lowest) - from `qc org select`, `qc app select`, etc.
+
+### Examples
+
+```bash
+# In a project with .quant.yml
+cd /path/to/my-project
+qc env logs -f              # Uses project config automatically
+qc ssh                      # Connects to project's default environment
+qc backup create            # Creates backup for project environment
+
+# Override project config with CLI flags
+qc env metrics --env=production  # Override environment
+qc ssh --org=other-org          # Override organization
+
+# Works from any subdirectory
+cd /path/to/my-project/src/components
+qc env list                     # Still finds .quant.yml at project root
+```
+
 ## Commands
 
 ### Authentication
@@ -89,6 +130,8 @@ npx @quantcdn/quant-cloud-cli
 - `qc ssh --command="shell_or_command"` - Run specific shell or one-shot command (non-interactive by default)
 - `qc ssh --command="command" --interactive` - Run command in interactive mode
 
+**Context Overrides:** All SSH commands support `--org`, `--app`, `--env`, `--platform` flags
+
 **Examples:**
 ```bash
 # Interactive bash shell (default)
@@ -112,14 +155,47 @@ qc ssh --container=php --command="mysql -u root -p" --interactive
 - `qc backup download [--output=path]` - Download backup files to local directory
 - `qc backup delete` - Delete backups with confirmation prompt
 
+**Context Overrides:** All backup commands support `--org`, `--app`, `--env`, `--platform` flags
+
+### Non-Interactive Mode
+
+All commands support context override flags for automation and CI/CD:
+
+```bash
+# Override any context parameter
+qc env logs --org=my-org --app=my-app --env=production --follow
+qc ssh --org=my-org --app=my-app --env=staging --container=web
+qc backup create --org=my-org --app=my-app --env=production --type=database
+qc env metrics --platform=quantgov --org=gov-dept --app=portal --env=prod
+```
+
 ## Configuration
 
-The CLI stores configuration in `~/.quant/credentials`. This includes:
+### User Configuration
+The CLI stores user configuration in `~/.quant/credentials`. This includes:
 - Multi-platform authentication tokens and refresh tokens
 - Active platform, organization, application, and environment context
 - Platform-specific settings and preferences
 
 Configuration is automatically migrated from single-platform to multi-platform format when upgrading.
+
+### Project Configuration
+Create a `.quant.yml` file at your project root for automatic context detection:
+
+```yaml
+# .quant.yml
+platform: quantcdn    # Platform: quantcdn or quantgov
+org: my-org           # Organization machine name
+app: my-application   # Application machine name  
+env: development      # Default environment name
+```
+
+**Directory Traversal:** The CLI searches for `.quant.yml` starting from the current directory and walking up to the git repository root.
+
+**Context Resolution Priority:**
+1. CLI flags (`--org`, `--app`, `--env`, `--platform`)
+2. Project config (`.quant.yml`)
+3. Stored user config (`~/.quant/credentials`)
 
 ## Development
 

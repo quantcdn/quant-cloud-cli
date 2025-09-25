@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { getActivePlatformConfig } from '../utils/config.js';
+import { resolveEffectiveContext } from '../utils/context.js';
 import { Logger } from '../utils/logger.js';
 
 const logger = new Logger('WhoAmI');
@@ -16,26 +17,22 @@ export function whoamiCommand(program: Command) {
 
 async function handleWhoAmI() {
   try {
-    const auth = await getActivePlatformConfig();
-    
-    if (!auth || !auth.token) {
-      logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
-      return;
-    }
+    // Get effective context (includes .quant.yml overrides)
+    const effectiveContext = await resolveEffectiveContext();
     
     // Check if token is expired
-    if (auth.expiresAt && new Date() >= new Date(auth.expiresAt)) {
+    if (effectiveContext.expiresAt && new Date() >= new Date(effectiveContext.expiresAt)) {
       logger.info('Token has expired. Run `quant-cloud login` to re-authenticate.');
       return;
     }
     
     logger.info('Authenticated');
-    logger.info(`Email: ${chalk.cyan(auth.email || 'Unknown')}`);
-    logger.info(`Host: ${chalk.cyan(auth.host)}`);
-    logger.info(`Token: ${chalk.gray(auth.token.substring(0, 10) + '...')}`);
+    logger.info(`Email: ${chalk.cyan(effectiveContext.email || 'Unknown')}`);
+    logger.info(`Host: ${chalk.cyan(effectiveContext.host)}`);
+    logger.info(`Token: ${chalk.gray(effectiveContext.token.substring(0, 10) + '...')}`);
     
-    if (auth.expiresAt) {
-      const expiryDate = new Date(auth.expiresAt);
+    if (effectiveContext.expiresAt) {
+      const expiryDate = new Date(effectiveContext.expiresAt);
       const now = new Date();
       const timeLeft = Math.max(0, expiryDate.getTime() - now.getTime());
       const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
@@ -46,30 +43,34 @@ async function handleWhoAmI() {
       }
     }
     
-    if (auth.organizations && auth.organizations.length > 0) {
-      logger.info(`Organizations: ${chalk.cyan(auth.organizations.length.toString())}`);
+    if (effectiveContext.organizations && effectiveContext.organizations.length > 0) {
+      logger.info(`Organizations: ${chalk.cyan(effectiveContext.organizations.length.toString())}`);
       
-      if (auth.activeOrganization) {
-        const activeOrg = auth.organizations.find(o => o.machine_name === auth.activeOrganization);
+      if (effectiveContext.activeOrganization) {
+        const activeOrg = effectiveContext.organizations.find(o => o.machine_name === effectiveContext.activeOrganization);
         if (activeOrg) {
-          logger.info(`Active organization: ${chalk.green(activeOrg.name)} (${chalk.gray(activeOrg.roles.map(r => r.display_name).join(', '))})`);
+          logger.info(`Active organization: ${chalk.green(activeOrg.name)} (${chalk.gray(activeOrg.roles.map((r: any) => r.display_name).join(', '))})`);
         }
       }
       
-      if (auth.activeApplication) {
-        logger.info(`Active application: ${chalk.cyan(auth.activeApplication)}`);
+      if (effectiveContext.activeApplication) {
+        logger.info(`Active application: ${chalk.cyan(effectiveContext.activeApplication)}`);
       }
       
-      if (auth.activeEnvironment) {
-        logger.info(`Active environment: ${chalk.magenta(auth.activeEnvironment)}`);
+      if (effectiveContext.activeEnvironment) {
+        logger.info(`Active environment: ${chalk.magenta(effectiveContext.activeEnvironment)}`);
       }
       
-      if (auth.organizations.length > 1) {
+      if (effectiveContext.organizations.length > 1) {
         logger.info(`${chalk.gray('Use')} ${chalk.cyan('quant-cloud org list')} ${chalk.gray('to see all organizations')}`);
       }
     }
     
-  } catch (error) {
-    logger.error('Failed to check authentication status:', error);
+  } catch (error: any) {
+    if (error.message?.includes('Not authenticated')) {
+      logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
+    } else {
+      logger.error('Failed to check authentication status:', error.message || String(error));
+    }
   }
 }

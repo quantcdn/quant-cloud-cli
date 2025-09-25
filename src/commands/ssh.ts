@@ -14,6 +14,7 @@ interface SSHOptions {
   env?: string;
   command?: string;
   interactive?: boolean;
+  platform?: string;
 }
 
 // Use the generated TypeScript client response type
@@ -27,12 +28,19 @@ export const sshCommand = new Command('ssh')
   .option('--env <env>', 'environment name')
   .option('--command <cmd>', 'command to run (default: /bin/bash for interactive shell)')
   .option('--interactive', 'force interactive mode (only needed with --command)')
+  .option('--platform <platform>', 'platform to use (override active platform)')
   .action(handleSSH);
 
 async function handleSSH(options: SSHOptions) {
   const spinner = createSpinner('Checking SSH access...');
   
   try {
+    // Log non-interactive mode parameters for validation
+    const hasNonInteractiveParams = options.org || options.app || options.env || options.container;
+    if (hasNonInteractiveParams) {
+      console.log(chalk.gray(`🔧 Non-interactive mode: org=${options.org || 'auto'}, app=${options.app || 'auto'}, env=${options.env || 'auto'}, container=${options.container || 'auto'}`));
+    }
+    
     const auth = await getActivePlatformConfig();
     if (!auth || !auth.token) {
       spinner.fail('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -47,7 +55,12 @@ async function handleSSH(options: SSHOptions) {
       return;
     }
 
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     
     // Resolve context
     const orgId = options.org || auth.activeOrganization;

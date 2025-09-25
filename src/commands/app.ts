@@ -17,7 +17,8 @@ export function appCommand(program: Command) {
   
   app.command('list')
     .description('List applications in the active organization')
-    .option('--org <orgId>', 'override organization')
+    .option('--org <org>', 'override organization')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options) => {
       await handleAppList(options);
     });
@@ -25,7 +26,8 @@ export function appCommand(program: Command) {
   app.command('select')
     .description('Select active application')
     .argument('[appId]', 'application name to select')
-    .option('--org <orgId>', 'override organization')
+    .option('--org <org>', 'override organization')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (appId, options) => {
       await handleAppSelect(appId, options);
     });
@@ -39,13 +41,17 @@ export function appCommand(program: Command) {
 
 interface AppOptions {
   org?: string;
+  platform?: string;
 }
 
 async function handleAppList(options: AppOptions) {
   const spinner = createSpinner('Loading applications...');
   
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      platform: options.platform
+    });
     const apps = await client.getApplications({ organizationId: options.org });
     
     // Remove debug logging
@@ -136,7 +142,10 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
 
     // Get applications with spinner
     const spinner = createSpinner('Loading applications...');
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options?.org,
+      platform: options?.platform
+    });
     
     let apps: any[] = [];
     try {

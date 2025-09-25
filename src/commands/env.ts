@@ -4,6 +4,7 @@ import gradient from 'gradient-string';
 import inquirer from 'inquirer';
 import autocomplete from 'inquirer-autocomplete-prompt';
 import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
+import { resolveEffectiveContext, validateContext } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
@@ -19,8 +20,9 @@ export function envCommand(program: Command) {
   
   env.command('list')
     .description('List environments for the active application')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options) => {
       await handleEnvList(options);
     });
@@ -28,8 +30,9 @@ export function envCommand(program: Command) {
   env.command('select')
     .description('Select active environment')
     .argument('[envId]', 'environment name to select')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvSelect(envId, options);
     });
@@ -43,11 +46,12 @@ export function envCommand(program: Command) {
   env.command('create')
     .description('Create a new environment')
     .argument('[envName]', 'name for the new environment')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
     .option('--clone-from <envName>', 'environment to clone configuration from')
     .option('--min-capacity <number>', 'minimum capacity (default: 1)', '1')
     .option('--max-capacity <number>', 'maximum capacity (default: 10)', '10')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envName, options) => {
       await handleEnvCreate(envName, options);
     });
@@ -55,10 +59,12 @@ export function envCommand(program: Command) {
   env.command('logs')
     .description('View environment logs')
     .argument('[envId]', 'environment name to view logs for')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--env <env>', 'override environment')
     .option('-f, --follow', 'follow log output (tail)')
     .option('-n, --lines <number>', 'number of lines to show (default: 100)', '100')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvLogs(envId, options);
     });
@@ -66,10 +72,12 @@ export function envCommand(program: Command) {
   env.command('metrics')
     .description('Live metrics dashboard for environment monitoring')
     .argument('[envId]', 'environment name to monitor')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--env <env>', 'override environment')
     .option('-r, --refresh <seconds>', 'refresh interval in seconds (default: 5)', '5')
     .option('--no-clear', 'disable screen clearing between updates')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvMetrics(envId, options);
     });
@@ -80,8 +88,10 @@ export function envCommand(program: Command) {
   state.command('stop')
     .description('Stop the active environment')
     .argument('[envId]', 'environment name to stop')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--env <env>', 'override environment')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvState('stop', envId, options);
     });
@@ -89,8 +99,10 @@ export function envCommand(program: Command) {
   state.command('start')
     .description('Start the active environment') 
     .argument('[envId]', 'environment name to start')
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--env <env>', 'override environment')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvState('start', envId, options);
     });
@@ -98,9 +110,11 @@ export function envCommand(program: Command) {
   state.command('redeploy')
     .description('Redeploy the active environment')
     .argument('[envId]', 'environment name to redeploy') 
-    .option('--org <orgId>', 'override organization')
-    .option('--app <appId>', 'override application')
+    .option('--org <org>', 'override organization')
+    .option('--app <app>', 'override application')
+    .option('--env <env>', 'override environment')
     .option('--tag <imageTag>', 'Docker image tag for redeployment')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (envId, options) => {
       await handleEnvState('redeploy', envId, options);
     });
@@ -109,6 +123,8 @@ export function envCommand(program: Command) {
 interface EnvOptions {
   org?: string;
   app?: string;
+  env?: string;
+  platform?: string;
 }
 
 interface EnvStateOptions extends EnvOptions {
@@ -135,7 +151,12 @@ async function handleEnvList(options: EnvOptions) {
   const spinner = createSpinner('Loading environments...');
   
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     const environments = await client.getEnvironments({ 
       organizationId: options.org,
       applicationId: options.app
@@ -214,7 +235,12 @@ async function handleEnvSelect(envId?: string, options?: EnvOptions) {
 
     // Get environments with spinner
     const spinner = createSpinner('Loading environments...');
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
     
     let environments: any[] = [];
     try {
@@ -356,40 +382,35 @@ async function handleEnvCurrent() {
 
 async function handleEnvState(action: 'stop' | 'start' | 'redeploy', envId?: string, options?: EnvStateOptions) {
   try {
-    const auth = await getActivePlatformConfig();
-    if (!auth || !auth.token) {
-      logger.error('Not authenticated. Run `quant-cloud login` first.');
-      return;
-    }
+    // Resolve effective context first
+    const effectiveContext = await resolveEffectiveContext({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
 
-    // Determine target environment
-    let targetEnvId = envId;
-    if (!targetEnvId && !auth.activeEnvironment) {
+    // Validate required context
+    validateContext(effectiveContext, { org: true, app: true });
+
+    // Determine target environment using effective context
+    const targetEnvId = envId || options?.env || effectiveContext.activeEnvironment;
+    
+    if (!targetEnvId) {
       logger.error('No environment specified and no active environment set.');
-      logger.info('Use `quant-cloud env select` to set an active environment or specify an environment name.');
-      return;
-    }
-    
-    targetEnvId = targetEnvId || auth.activeEnvironment;
-    
-    // Determine context
-    const organizationId = options?.org || auth.activeOrganization;
-    const applicationId = options?.app || auth.activeApplication;
-    
-    if (!organizationId) {
-      logger.error('No organization found. Use `quant-cloud org select` first.');
-      return;
-    }
-    
-    if (!applicationId) {
-      logger.error('No application found. Use `quant-cloud app select` first.');
+      logger.info('Use --env flag or set active environment with `qc env select`.');
       return;
     }
 
     const spinner = createSpinner(`${action === 'stop' ? 'Stopping' : action === 'start' ? 'Starting' : 'Redeploying'} environment: ${targetEnvId}...`);
     
     try {
-      const client = await ApiClient.create();
+      const client = await ApiClient.create({
+        org: options?.org,
+        app: options?.app,
+        env: options?.env,
+        platform: options?.platform
+      });
       
       // Prepare the state update request
       const stateRequest: any = {
@@ -402,9 +423,9 @@ async function handleEnvState(action: 'stop' | 'start' | 'redeploy', envId?: str
       }
       
       await client.environmentsApi.updateEnvironmentState(
-        organizationId,
-        applicationId,
-        targetEnvId!,
+        effectiveContext.activeOrganization!,
+        effectiveContext.activeApplication!,
+        targetEnvId,
         stateRequest
       );
       
@@ -420,7 +441,7 @@ async function handleEnvState(action: 'stop' | 'start' | 'redeploy', envId?: str
       spinner.fail(`Failed to ${action} environment`);
       
       if (error.response && error.response.status === 404) {
-        logger.error(`Environment '${targetEnvId}' not found in application '${applicationId}'`);
+        logger.error(`Environment '${targetEnvId}' not found in application '${effectiveContext.activeApplication}'`);
       } else if (error.response && error.response.status === 403) {
         logger.error('Insufficient permissions to control environment state');
       } else {
@@ -437,25 +458,16 @@ async function handleEnvState(action: 'stop' | 'start' | 'redeploy', envId?: str
 
 async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
   try {
-    const auth = await getActivePlatformConfig();
-    if (!auth || !auth.token) {
-      logger.error('Not authenticated. Run `quant-cloud login` first.');
-      return;
-    }
+    // Resolve effective context first
+    const effectiveContext = await resolveEffectiveContext({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
 
-    // Determine context
-    const organizationId = options?.org || auth.activeOrganization;
-    const applicationId = options?.app || auth.activeApplication;
-    
-    if (!organizationId) {
-      logger.error('No organization found. Use `quant-cloud org select` first.');
-      return;
-    }
-    
-    if (!applicationId) {
-      logger.error('No application found. Use `quant-cloud app select` first.');
-      return;
-    }
+    // Validate required context
+    validateContext(effectiveContext, { org: true, app: true });
 
     // Prompt for environment name if not provided
     let targetEnvName = envName;
@@ -477,12 +489,16 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
 
     // Get existing environments for cloning options
     const loadSpinner = createSpinner('Loading existing environments...');
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options?.org,
+      app: options?.app,
+      platform: options?.platform
+    });
     
     try {
       const environments = await client.getEnvironments({ 
-        organizationId,
-        applicationId 
+        organizationId: effectiveContext.activeOrganization,
+        applicationId: effectiveContext.activeApplication
       });
       loadSpinner.succeed('Loaded environments');
 
@@ -522,8 +538,8 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
       
       try {
         const response = await client.environmentsApi.createEnvironment(
-          organizationId,
-          applicationId, 
+          effectiveContext.activeOrganization!,
+          effectiveContext.activeApplication!, 
           createRequest
         );
         
@@ -569,37 +585,32 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
 
 async function handleEnvLogs(envId?: string, options?: EnvLogsOptions) {
   try {
-    const auth = await getActivePlatformConfig();
-    if (!auth || !auth.token) {
-      logger.error('Not authenticated. Run `quant-cloud login` first.');
-      return;
-    }
+    // Resolve effective context first (this handles all overrides)
+    const effectiveContext = await resolveEffectiveContext({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
 
-    // Determine target environment
-    let targetEnvId = envId;
-    if (!targetEnvId && !auth.activeEnvironment) {
+    // Validate required context
+    validateContext(effectiveContext, { org: true, app: true });
+
+    // Determine target environment using effective context
+    const resolvedEnvId = envId || options?.env || effectiveContext.activeEnvironment;
+    
+    if (!resolvedEnvId) {
       logger.error('No environment specified and no active environment set.');
-      logger.info('Use `quant-cloud env select` to set an active environment or specify an environment name.');
-      return;
-    }
-    
-    const resolvedEnvId = targetEnvId || auth.activeEnvironment!;
-    
-    // Determine context
-    const organizationId = options?.org || auth.activeOrganization;
-    const applicationId = options?.app || auth.activeApplication;
-    
-    if (!organizationId) {
-      logger.error('No organization found. Use `quant-cloud org select` first.');
-      return;
-    }
-    
-    if (!applicationId) {
-      logger.error('No application found. Use `quant-cloud app select` first.');
+      logger.info('Use --env flag or set active environment with `qc env select`.');
       return;
     }
 
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
     const maxLines = parseInt(options?.lines || '100');
     
     console.log(chalk.gray(`--- Logs for environment: ${chalk.cyan(resolvedEnvId)} ---`));
@@ -621,7 +632,7 @@ async function handleEnvLogs(envId?: string, options?: EnvLogsOptions) {
       // Poll for logs every 2 seconds
       while (isFollowing) {
         try {
-          const logs = await fetchLogs(client, organizationId, applicationId, resolvedEnvId);
+          const logs = await fetchLogs(client, effectiveContext.activeOrganization!, effectiveContext.activeApplication!, resolvedEnvId);
           
           if (logs && logs.length > 0) {
             const newLogs: any[] = lastTimestamp 
@@ -649,7 +660,7 @@ async function handleEnvLogs(envId?: string, options?: EnvLogsOptions) {
       const spinner = createSpinner('Fetching logs...');
       
       try {
-        const logs = await fetchLogs(client, organizationId, applicationId, resolvedEnvId);
+        const logs = await fetchLogs(client, effectiveContext.activeOrganization!, effectiveContext.activeApplication!, resolvedEnvId);
         spinner.stop();
         
         if (logs && logs.length > 0) {
@@ -759,14 +770,23 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
   const spinner = createSpinner('Loading environment metrics...');
   
   try {
-    const auth = await getActivePlatformConfig();
-    if (!auth || !auth.token) {
-      spinner.fail('Not authenticated');
-      logger.info('Run `quant-cloud login` to authenticate.');
-      return;
-    }
+    // Resolve effective context first
+    const effectiveContext = await resolveEffectiveContext({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
 
-    const client = await ApiClient.create();
+    // Validate required context
+    validateContext(effectiveContext, { org: true, app: true });
+
+    const client = await ApiClient.create({
+      org: options?.org,
+      app: options?.app,
+      env: options?.env,
+      platform: options?.platform
+    });
     const refreshInterval = parseInt(options?.refresh || '5') * 1000;
     const shouldClear = options?.clear !== false;
     
@@ -784,16 +804,14 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
       return;
     }
 
-    // Resolve target environment
-    let targetEnvId = envId;
+    // Resolve target environment using effective context
+    let targetEnvId = envId || options?.env || effectiveContext.activeEnvironment;
     if (!targetEnvId) {
       if (environments.length === 1) {
         targetEnvId = environments[0].envName;
-      } else if (auth.activeEnvironment) {
-        targetEnvId = auth.activeEnvironment;
       } else {
         spinner.fail('No environment specified');
-        logger.error('Use env ID or set active environment.');
+        logger.error('Use --env flag or set active environment.');
         return;
       }
     }
@@ -827,8 +845,8 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         if (isFirstRun) {
           console.clear();
           
-          // Get application name for the static layout
-          const appName = auth.activeApplication || client['defaultApplicationId'] || 'unknown';
+          // Get application name from effective context (client has the overridden values) 
+          const appName = client['defaultApplicationId'] || effectiveContext.activeApplication || 'unknown';
           
           // Print static layout structure that never changes
           console.log(gradient(['#00ff88', '#0088ff', '#8800ff'])('██ QUANT LIVE METRICS'));
@@ -860,7 +878,7 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
           console.log('─'.repeat(60));
           console.log(`Updates:       ---`);
           console.log(`Refresh:       Every ${options?.refresh || '5'}s`);
-          console.log(`Context:       ${auth.email} @ ${auth.activeOrganization || 'default'}`);
+          console.log(`Context:       ${effectiveContext.email} @ ${effectiveContext.activeOrganization || 'default'}`);
           console.log();
           console.log(`${chalk.gray('Press Ctrl+C to exit')}`);
           
@@ -873,8 +891,8 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         const spinnerChar = spinnerFrames[updateCount % spinnerFrames.length];
         
-        // Get application name from auth or client
-        const appName = auth.activeApplication || client['defaultApplicationId'] || 'unknown';
+        // Get application name from effective context (client has the overridden values)
+        const appName = client['defaultApplicationId'] || effectiveContext.activeApplication || 'unknown';
         
         // Update header with spinner during fetch
         process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp} ${chalk.gray(spinnerChar)}`);
@@ -893,7 +911,7 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
           throw new Error('Environment not found');
         }
 
-        // Fetch metrics data
+        // Fetch metrics data using the effective context from the client
         const organizationId = client['defaultOrganizationId'];
         const applicationId = client['defaultApplicationId'];
         if (organizationId && applicationId) {

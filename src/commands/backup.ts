@@ -21,11 +21,13 @@ interface BackupOptions {
   app?: string;
   env?: string;
   output?: string;
+  platform?: string;
 }
 
 interface BackupListOptions extends BackupOptions {
   json?: boolean;
   type?: string;
+  platform?: string;
 }
 
 interface BackupCreateOptions extends BackupOptions {
@@ -40,11 +42,12 @@ export function backupCommand(program: Command) {
   backup
     .command('list')
     .description('List available backups')
-    .option('--org <organizationId>', 'Organization ID')
-    .option('--app <applicationId>', 'Application ID')  
-    .option('--env <environmentId>', 'Environment ID')
+    .option('--org <org>', 'Organization ID')
+    .option('--app <app>', 'Application ID')  
+    .option('--env <env>', 'Environment ID')
     .option('--type <type>', 'Filter by backup type (database, filesystem)', 'database')
     .option('--json', 'Output as JSON')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options: BackupListOptions) => {
       await handleBackupList(options);
     });
@@ -52,11 +55,12 @@ export function backupCommand(program: Command) {
   backup
     .command('create')
     .description('Create a new backup')
-    .option('--org <organizationId>', 'Organization ID')
-    .option('--app <applicationId>', 'Application ID')
-    .option('--env <environmentId>', 'Environment ID') 
+    .option('--org <org>', 'Organization ID')
+    .option('--app <app>', 'Application ID')
+    .option('--env <env>', 'Environment ID') 
     .option('--type <type>', 'Backup type: database or filesystem', 'database')
     .option('--description <description>', 'Backup description')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options: BackupCreateOptions) => {
       await handleBackupCreate(options);
     });
@@ -64,10 +68,11 @@ export function backupCommand(program: Command) {
   backup
     .command('download')
     .description('Download a backup')
-    .option('--org <organizationId>', 'Organization ID')
-    .option('--app <applicationId>', 'Application ID')
-    .option('--env <environmentId>', 'Environment ID')
+    .option('--org <org>', 'Organization ID')
+    .option('--app <app>', 'Application ID')
+    .option('--env <env>', 'Environment ID')
     .option('--output <path>', 'Output directory', './downloads')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options: BackupOptions) => {
       await handleBackupDownload(options);
     });
@@ -75,9 +80,10 @@ export function backupCommand(program: Command) {
   backup
     .command('delete')
     .description('Delete a backup')
-    .option('--org <organizationId>', 'Organization ID')
-    .option('--app <applicationId>', 'Application ID')
-    .option('--env <environmentId>', 'Environment ID')
+    .option('--org <org>', 'Organization ID')
+    .option('--app <app>', 'Application ID')
+    .option('--env <env>', 'Environment ID')
+    .option('--platform <platform>', 'platform to use (override active platform)')
     .action(async (options: BackupOptions) => {
       await handleBackupDelete(options);
     });
@@ -87,7 +93,12 @@ export function backupCommand(program: Command) {
 
 async function handleBackupList(options: BackupListOptions): Promise<void> {
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     
     // Get target identifiers
     const orgId = options.org || client['defaultOrganizationId'];
@@ -170,7 +181,12 @@ async function handleBackupList(options: BackupListOptions): Promise<void> {
 
 async function handleBackupCreate(options: BackupCreateOptions): Promise<void> {
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     
     // Get target identifiers
     const orgId = options.org || client['defaultOrganizationId'];
@@ -253,7 +269,12 @@ async function handleBackupCreate(options: BackupCreateOptions): Promise<void> {
 
 async function handleBackupDownload(options: BackupOptions): Promise<void> {
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     
     // Get target identifiers
     const orgId = options.org || client['defaultOrganizationId'];
@@ -428,7 +449,12 @@ function downloadFile(url: string, filePath: string): Promise<void> {
 
 async function handleBackupDelete(options: BackupOptions): Promise<void> {
   try {
-    const client = await ApiClient.create();
+    const client = await ApiClient.create({
+      org: options.org,
+      app: options.app,
+      env: options.env,
+      platform: options.platform
+    });
     
     // Get target identifiers
     const orgId = options.org || client['defaultOrganizationId'];

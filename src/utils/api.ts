@@ -1,4 +1,5 @@
 import { getActivePlatformConfig } from './config.js';
+import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
 import { Logger } from './logger.js';
 import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi } from '@quantcdn/quant-client';
 
@@ -50,14 +51,16 @@ export class ApiClient {
     this.backupManagementApi.defaultHeaders = defaultHeaders;
   }
 
-  static async create(): Promise<ApiClient> {
-    const auth = await getActivePlatformConfig();
+  static async create(contextOverrides: ContextOverrides = {}): Promise<ApiClient> {
+    const context = await resolveEffectiveContext(contextOverrides);
     
-    if (!auth || !auth.token) {
-      throw new Error('Not authenticated. Run `quant-cloud login` first.');
-    }
-
-    return new ApiClient(auth.host, auth.token, auth.activeOrganization, auth.activeApplication, auth.activeEnvironment);
+    return new ApiClient(
+      context.host, 
+      context.token, 
+      context.activeOrganization, 
+      context.activeApplication, 
+      context.activeEnvironment
+    );
   }
 
   // Old request method removed - now using TypeScript client
@@ -77,8 +80,16 @@ export class ApiClient {
       const response = await this.applicationsApi.listApplications(organizationId);
       return response.body;
     } catch (error: any) {
-      logger.error('Failed to fetch applications:', error);
-      throw error;
+      // Provide friendly error messages instead of debug dumps
+      if (error.statusCode === 404) {
+        throw new Error(`Organization '${organizationId}' not found or no access to applications.`);
+      } else if (error.statusCode === 403) {
+        throw new Error(`Access denied to applications in organization '${organizationId}'.`);
+      } else if (error.statusCode === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch applications: ${error.message || 'Network error'}`);
+      }
     }
   }
 
@@ -98,8 +109,20 @@ export class ApiClient {
       const response = await this.environmentsApi.listEnvironments(organizationId, applicationId);
       return response.body;
     } catch (error: any) {
-      logger.error('Failed to fetch environments:', error);
-      throw error;
+      // Provide friendly error messages instead of debug dumps
+      if (error.statusCode === 404) {
+        if (error.body?.message?.includes('Application') && error.body?.message?.includes('not found')) {
+          throw new Error(`Application '${organizationId}/${applicationId}' not found.`);
+        } else {
+          throw new Error(`Organization '${organizationId}' not found or no access to environments.`);
+        }
+      } else if (error.statusCode === 403) {
+        throw new Error(`Access denied to environments in '${organizationId}/${applicationId}'.`);
+      } else if (error.statusCode === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch environments: ${error.message || 'Network error'}`);
+      }
     }
   }
 
@@ -111,18 +134,32 @@ export class ApiClient {
   async getUserInfo(): Promise<any> {
     // OAuth user info is fetched directly, not through the TypeScript client
     // This endpoint is not part of the v3 API, it's part of the OAuth system
-    const response = await fetch(`${this.applicationsApi.basePath.replace('/api/v3', '')}/api/oauth/user`, {
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Accept': 'application/json'
+    try {
+      const response = await fetch(`${this.applicationsApi.basePath.replace('/api/v3', '')}/api/oauth/user`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+        } else if (response.status === 403) {
+          throw new Error('Access denied to user information.');
+        } else {
+          throw new Error(`Failed to get user info: ${response.status} ${response.statusText}`);
+        }
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`Failed to get user info: ${response.status} ${response.statusText}`);
+      return await response.json();
+    } catch (error: any) {
+      if (error.message?.includes('Authentication expired') || error.message?.includes('Access denied')) {
+        throw error; // Re-throw our friendly errors
+      } else {
+        throw new Error(`Failed to get user info: ${error.message || 'Network error'}`);
+      }
     }
-
-    return await response.json();
   }
 
   async getEnvironmentMetrics(options: { organizationId?: string, applicationId?: string, environmentId: string }): Promise<any> {
@@ -133,7 +170,20 @@ export class ApiClient {
       throw new Error('Organization ID and Application ID are required');
     }
 
-    const response = await this.environmentsApi.getEnvironmentMetrics(organizationId, applicationId, options.environmentId);
-    return response.body;
+    try {
+      const response = await this.environmentsApi.getEnvironmentMetrics(organizationId, applicationId, options.environmentId);
+      return response.body;
+    } catch (error: any) {
+      // Provide friendly error messages instead of debug dumps
+      if (error.statusCode === 404) {
+        throw new Error(`Environment '${organizationId}/${applicationId}/${options.environmentId}' not found or metrics unavailable.`);
+      } else if (error.statusCode === 403) {
+        throw new Error(`Access denied to metrics for '${organizationId}/${applicationId}/${options.environmentId}'.`);
+      } else if (error.statusCode === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch metrics: ${error.message || 'Network error'}`);
+      }
+    }
   }
 }
