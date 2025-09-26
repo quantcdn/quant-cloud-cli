@@ -211,10 +211,9 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
       '--command', targetCommand
     ];
 
-    // Add --interactive based on our logic
-    if (isInteractive) {
-      args.splice(-2, 0, '--interactive');
-    }
+    // ECS cluster only supports interactive mode currently
+    // Always use --interactive, but command vs shell behavior is handled by targetCommand
+    args.push('--interactive');
 
     const child = spawn('aws', args, { 
       env,
