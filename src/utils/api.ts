@@ -1,6 +1,6 @@
 import { getActivePlatformConfig } from './config.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -27,32 +27,32 @@ export class ApiClient {
       baseUrl = baseUrl.replace('/api/v3', '');
     }
 
-    // Configure the APIs - SDK now handles /api/v3 internally
-    this.applicationsApi = new ApplicationsApi(baseUrl);
-    this.environmentsApi = new EnvironmentsApi(baseUrl);
-    this.sshAccessApi = new SSHAccessApi(baseUrl);
-    this.backupManagementApi = new BackupManagementApi(baseUrl);
+    // Create Configuration object for axios-based APIs
+    const config = new Configuration({
+      basePath: baseUrl,
+      accessToken: token,
+      baseOptions: {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...(defaultOrganizationId && { 'X-Organization': defaultOrganizationId }),
+          ...(defaultApplicationId && { 'X-Application': defaultApplicationId }),
+          ...(defaultEnvironmentId && { 'X-Environment': defaultEnvironmentId }),
+        }
+      }
+    });
+
+    // Configure the APIs with Configuration object
+    this.applicationsApi = new ApplicationsApi(config);
+    this.environmentsApi = new EnvironmentsApi(config);
+    this.sshAccessApi = new SSHAccessApi(config);
+    this.backupManagementApi = new BackupManagementApi(config);
     
     this.baseUrl = baseUrl;
     this.token = token;
     this.defaultOrganizationId = defaultOrganizationId;
     this.defaultApplicationId = defaultApplicationId;
     this.defaultEnvironmentId = defaultEnvironmentId;
-
-    // Set authentication headers
-    const defaultHeaders = {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      ...(defaultOrganizationId && { 'X-Organization': defaultOrganizationId }),
-      ...(defaultApplicationId && { 'X-Application': defaultApplicationId }),
-      ...(defaultEnvironmentId && { 'X-Environment': defaultEnvironmentId }),
-    };
-
-    this.applicationsApi.defaultHeaders = defaultHeaders;
-    this.environmentsApi.defaultHeaders = defaultHeaders;
-    this.sshAccessApi.defaultHeaders = defaultHeaders;
-    this.backupManagementApi.defaultHeaders = defaultHeaders;
   }
 
   static async create(): Promise<ApiClient> {
@@ -80,7 +80,7 @@ export class ApiClient {
 
     try {
       const response = await this.applicationsApi.listApplications(organizationId);
-      return response.body;
+      return response.data;
     } catch (error: any) {
       logger.error('Failed to fetch applications:', error);
       throw error;
@@ -101,7 +101,7 @@ export class ApiClient {
 
     try {
       const response = await this.environmentsApi.listEnvironments(organizationId, applicationId);
-      return response.body;
+      return response.data;
     } catch (error: any) {
       logger.error('Failed to fetch environments:', error);
       throw error;
@@ -139,6 +139,6 @@ export class ApiClient {
     }
 
     const response = await this.environmentsApi.getEnvironmentMetrics(organizationId, applicationId, options.environmentId);
-    return response.body;
+    return response.data;
   }
 }

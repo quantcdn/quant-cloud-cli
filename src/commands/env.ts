@@ -530,7 +530,7 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
         spinner.succeed(`Environment '${targetEnvName}' created successfully!`);
         
         // Display created environment info
-        const createdEnv = response.body;
+        const createdEnv = response.data;
         logger.info(`${chalk.green('✓')} Environment: ${chalk.cyan(createdEnv.envName)}`);
         if (cloneFrom) {
           logger.info(`${chalk.gray('Cloned from:')} ${chalk.yellow(cloneFrom)}`);
@@ -684,27 +684,35 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
       environmentId
     );
     
+    // Handle the case where response might be void or undefined
+    if (!response) {
+      return [];
+    }
+    
+    // Cast response to any to handle the void type issue
+    const responseData = (response as any).data;
+    
     // The logs might be in different formats, let's handle various possibilities
-    if (response.body) {
-      // If body is already parsed JSON
-      if (Array.isArray(response.body)) {
-        return response.body;
+    if (responseData && responseData !== null && responseData !== undefined) {
+      // If data is already parsed JSON
+      if (Array.isArray(responseData)) {
+        return responseData;
       }
       
-      // If body has a logs property
-      if (response.body.logs && Array.isArray(response.body.logs)) {
-        return response.body.logs;
+      // If data has a logs property
+      if (responseData.logs && Array.isArray(responseData.logs)) {
+        return responseData.logs;
       }
       
-      // If body is a single log entry
-      if (response.body.message || response.body.timestamp) {
-        return [response.body];
+      // If data is a single log entry
+      if (responseData.message || responseData.timestamp) {
+        return [responseData];
       }
       
       // Try to parse as JSON string if it's a string
-      if (typeof response.body === 'string') {
+      if (typeof responseData === 'string') {
         try {
-          const parsed = JSON.parse(response.body);
+          const parsed = JSON.parse(responseData);
           if (Array.isArray(parsed)) {
             return parsed;
           }
@@ -714,7 +722,7 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
           return [parsed];
         } catch {
           // If parsing fails, treat as plain text logs
-          return [{ message: response.body, timestamp: new Date().toISOString() }];
+          return [{ message: responseData, timestamp: new Date().toISOString() }];
         }
       }
     }

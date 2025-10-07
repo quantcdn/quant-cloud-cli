@@ -50,7 +50,7 @@
     "inquirer-autocomplete-prompt": "^3.0.1",
     "node-fetch": "^3.3.2",
     "open": "^9.1.0",
-    "@quantcdn/quant-client": "^3.0.0"
+    "@quantcdn/quant-client": "file:../quant-ts-client"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

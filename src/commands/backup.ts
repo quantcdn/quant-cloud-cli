@@ -104,7 +104,7 @@ async function handleBackupList(options: BackupListOptions): Promise<void> {
     try {
       const backupType = (options.type || 'database') as 'database' | 'filesystem';
       const response = await client.backupManagementApi.listBackups(orgId, appId, envId, backupType);
-      const backups = response.body?.backups || [];
+      const backups = response.data?.backups || [];
       
       spinner.succeed(`Found ${backups.length} backups`);
 
@@ -221,7 +221,7 @@ async function handleBackupCreate(options: BackupCreateOptions): Promise<void> {
       };
 
       const response = await client.backupManagementApi.createBackup(orgId, appId, envId, backupType as 'database' | 'filesystem', createRequest);
-      const backup = response.body;
+      const backup = response.data;
       
       spinner.succeed('Backup creation initiated!');
       
@@ -270,7 +270,7 @@ async function handleBackupDownload(options: BackupOptions): Promise<void> {
     try {
       // First, get the list of backups
       const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, 'database');
-      const backups = listResponse.body?.backups || [];
+      const backups = listResponse.data?.backups || [];
       
       if (backups.length === 0) {
         spinner.fail('No backups found');
@@ -320,7 +320,7 @@ async function handleBackupDownload(options: BackupOptions): Promise<void> {
       try {
         // Step 1: Get download URL from API
         const downloadResponse = await client.backupManagementApi.downloadBackup(orgId, appId, envId, 'database', selectedBackupId);
-        const downloadData = downloadResponse.body as any;
+        const downloadData = downloadResponse.data as any;
         
         if (!downloadData?.downloadUrl) {
           downloadSpinner.fail('No download URL received from API');
@@ -445,7 +445,7 @@ async function handleBackupDelete(options: BackupOptions): Promise<void> {
     try {
       // First, get the list of backups
       const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, 'database');
-      const backups = listResponse.body?.backups || [];
+      const backups = listResponse.data?.backups || [];
       
       if (backups.length === 0) {
         spinner.fail('No backups found');
