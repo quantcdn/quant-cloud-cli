@@ -247,9 +247,68 @@ npm run dev
 npm link
 ```
 
+### Testing
+
+The CLI includes comprehensive unit and integration tests. Integration tests use a mock API backend via Docker.
+
+#### Running Tests
+
+```bash
+# Unit tests only (fast, no Docker required)
+npm test
+# or
+make test
+
+# Integration tests (requires Docker)
+npm run test:integration
+# or  
+make test-integration
+
+# All tests
+npm run test:all
+# or
+make test-all
+
+# With coverage
+npm run test:coverage
+```
+
+#### Manual Testing with Mock API
+
+Test CLI commands against the mock API backend:
+
+```bash
+# Start mock API
+make mock-api-start
+
+# Configure CLI to use mock API (in another terminal)
+export QUANT_HOST=http://localhost:4010
+export QUANT_TOKEN=mock-token-123
+
+# Test commands
+qc app list --org=test-org
+qc env list --org=test-org --app=test-app
+
+# Stop mock API
+make mock-api-stop
+```
+
+#### Mock API
+
+The mock API is built with [Prism](https://stoplight.io/open-source/prism) and automatically generates valid responses from the OpenAPI specification.
+
+- **Container**: `ghcr.io/quantcdn/quant-mock-api:4.0.0`
+- **Endpoint**: `http://localhost:4010`
+- **Auto-managed**: Integration tests start/stop Docker automatically
+- **Public**: No authentication required to pull the container
+
+See `__tests__/README.md` for detailed testing documentation.
+
 ## Environment Variables
 
 - `LOG_LEVEL` - Set logging level (DEBUG, INFO, WARN, ERROR)
+- `QUANT_HOST` - Override API host (useful for testing with mock API)
+- `QUANT_TOKEN` - Override authentication token (for testing)
 
 ## License
 

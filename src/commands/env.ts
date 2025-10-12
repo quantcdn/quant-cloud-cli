@@ -902,14 +902,13 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp} ${chalk.gray(spinnerChar)}`);
         
         // Fetch fresh environment and metrics data
-        let currentEnv: any;
         let metricsData: any = {};
         
         const freshEnvironments = await client.getEnvironments({ 
           organizationId: options?.org,
           applicationId: options?.app
         });
-        currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
+        const currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
         
         if (!currentEnv) {
           throw new Error('Environment not found');
