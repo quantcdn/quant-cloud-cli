@@ -1,6 +1,12 @@
 import { execSync } from 'child_process';
 
 export default async function globalTeardown() {
+  // Skip Docker management in CI - service container is managed by GitHub Actions
+  if (process.env.CI || process.env.GITHUB_ACTIONS) {
+    console.log('\n✅ Running in CI - mock API service will be stopped by GitHub Actions\n');
+    return;
+  }
+
   console.log('\n🐳 Stopping mock API container...\n');
 
   try {

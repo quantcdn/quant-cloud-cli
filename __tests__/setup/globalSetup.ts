@@ -2,6 +2,12 @@ import { execSync } from 'child_process';
 import { setTimeout } from 'timers/promises';
 
 export default async function globalSetup() {
+  // Skip Docker management in CI - container is already running as a service
+  if (process.env.CI || process.env.GITHUB_ACTIONS) {
+    console.log('\n✅ Running in CI - using existing mock API service\n');
+    return;
+  }
+
   console.log('\n🐳 Starting mock API container...\n');
 
   try {
