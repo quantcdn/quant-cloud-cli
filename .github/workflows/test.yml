@@ -60,10 +60,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Wait for mock API
-        run: |
-          timeout 30 sh -c 'until curl -f http://localhost:4010/ 2>/dev/null; do sleep 1; done'
-      
       - name: Run integration tests
         env:
           MOCK_API_URL: http://localhost:4010
