@@ -152,10 +152,25 @@ qc ssh --container=php --command="mysql -u root -p" --interactive
 ### Backup Management
 - `qc backup list [--type=database|filesystem]` - List available backups with status and details
 - `qc backup create [--type=database|filesystem]` - Create new backup with interactive prompts
-- `qc backup download [--output=path]` - Download backup files to local directory
+- `qc backup download [backupId] [--output=path]` - Download backup files to local directory
+  - Interactive mode: Shows list with descriptions, dates, and sizes
+  - Direct mode: `qc backup download <backupId>` to download specific backup
 - `qc backup delete` - Delete backups with confirmation prompt
 
 **Context Overrides:** All backup commands support `--org`, `--app`, `--env`, `--platform` flags
+
+**Examples:**
+```bash
+# Interactive selection with descriptions
+qc backup download
+
+# Download specific backup by ID
+qc backup download backup-2024-01-15-abc123
+
+# Download to specific directory
+qc backup download --output=./my-backups
+qc backup download backup-2024-01-15-abc123 --output=./my-backups
+```
 
 ### Non-Interactive Mode
 

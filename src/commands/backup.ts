@@ -66,15 +66,15 @@ export function backupCommand(program: Command) {
     });
 
   backup
-    .command('download')
+    .command('download [backupId]')
     .description('Download a backup')
     .option('--org <org>', 'Organization ID')
     .option('--app <app>', 'Application ID')
     .option('--env <env>', 'Environment ID')
     .option('--output <path>', 'Output directory', './downloads')
     .option('--platform <platform>', 'platform to use (override active platform)')
-    .action(async (options: BackupOptions) => {
-      await handleBackupDownload(options);
+    .action(async (backupId: string | undefined, options: BackupOptions) => {
+      await handleBackupDownload(backupId, options);
     });
 
   backup
@@ -267,7 +267,7 @@ async function handleBackupCreate(options: BackupCreateOptions): Promise<void> {
   }
 }
 
-async function handleBackupDownload(options: BackupOptions): Promise<void> {
+async function handleBackupDownload(backupId: string | undefined, options: BackupOptions): Promise<void> {
   try {
     const client = await ApiClient.create({
       org: options.org,
@@ -301,33 +301,52 @@ async function handleBackupDownload(options: BackupOptions): Promise<void> {
 
       spinner.succeed(`Found ${backups.length} backups`);
 
-      // Let user select which backup to download
-      const choices = backups
-        .filter((backup: any) => backup.status === 'completed') // Only show completed backups
-        .map((backup: any, index: number) => {
-          const backupId = backup.backupId || backup.id;
-          const size = backup.sizeFormatted || formatBytes(backup.size || 0);
-          const displayName = `${backupId} (${new Date(backup.createdAt || '').toLocaleDateString()}) - ${size}`;
-          
-          return {
-            name: displayName,
-            value: backupId
-          };
-        });
+      let selectedBackupId: string;
 
-      if (choices.length === 0) {
-        console.log(chalk.yellow('No completed backups available for download.'));
-        return;
-      }
-
-      const { selectedBackupId } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'selectedBackupId',
-          message: 'Select backup to download:',
-          choices
+      // If backup ID provided as argument, use it directly
+      if (backupId) {
+        // Verify the backup exists and is completed
+        const backup = backups.find((b: any) => (b.backupId || b.id) === backupId);
+        if (!backup) {
+          console.log(chalk.red(`\n❌ Backup '${backupId}' not found`));
+          return;
         }
-      ]);
+        if (backup.status !== 'completed') {
+          console.log(chalk.yellow(`\n⚠ Backup '${backupId}' is not completed (status: ${backup.status})`));
+          return;
+        }
+        selectedBackupId = backupId;
+      } else {
+        // Let user select which backup to download
+        const choices = backups
+          .filter((backup: any) => backup.status === 'completed') // Only show completed backups
+          .map((backup: any, index: number) => {
+            const backupId = backup.backupId || backup.id;
+            const size = backup.sizeFormatted || formatBytes(backup.size || 0);
+            const description = backup.description ? ` (${backup.description})` : '';
+            const displayName = `${backupId}${description} - ${new Date(backup.createdAt || '').toLocaleDateString()} - ${size}`;
+            
+            return {
+              name: displayName,
+              value: backupId
+            };
+          });
+
+        if (choices.length === 0) {
+          console.log(chalk.yellow('No completed backups available for download.'));
+          return;
+        }
+
+        const selection = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'selectedBackupId',
+            message: 'Select backup to download:',
+            choices
+          }
+        ]);
+        selectedBackupId = selection.selectedBackupId;
+      }
 
       // Find the selected backup
       const selectedBackup = backups.find((b: any) => (b.backupId || b.id) === selectedBackupId);
