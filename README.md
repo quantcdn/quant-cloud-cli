@@ -150,26 +150,41 @@ qc ssh --container=php --command="mysql -u root -p" --interactive
 ```
 
 ### Backup Management
+
+All backup commands support both **database** and **filesystem** backup types via the `--type` flag (defaults to `database`).
+
 - `qc backup list [--type=database|filesystem]` - List available backups with status and details
 - `qc backup create [--type=database|filesystem]` - Create new backup with interactive prompts
-- `qc backup download [backupId] [--output=path]` - Download backup files to local directory
+- `qc backup download [backupId] [--type=database|filesystem] [--output=path]` - Download backup files to local directory
   - Interactive mode: Shows list with descriptions, dates, and sizes
   - Direct mode: `qc backup download <backupId>` to download specific backup
-- `qc backup delete` - Delete backups with confirmation prompt
+- `qc backup delete [--type=database|filesystem]` - Delete backups with confirmation prompt
 
 **Context Overrides:** All backup commands support `--org`, `--app`, `--env`, `--platform` flags
 
 **Examples:**
 ```bash
-# Interactive selection with descriptions
+# Database backups (default)
+qc backup list
+qc backup create --description="Pre-deployment backup"
 qc backup download
+
+# Filesystem backups
+qc backup list --type=filesystem
+qc backup create --type=filesystem --description="Files before migration"
+qc backup download --type=filesystem
 
 # Download specific backup by ID
 qc backup download backup-2024-01-15-abc123
+qc backup download backup-2024-01-15-abc123 --type=filesystem
 
 # Download to specific directory
 qc backup download --output=./my-backups
-qc backup download backup-2024-01-15-abc123 --output=./my-backups
+qc backup download backup-2024-01-15-abc123 --output=./my-backups --type=database
+
+# Full automation with context overrides
+qc backup create --org=my-org --app=my-app --env=production --type=database --description="Automated backup"
+qc backup download backup-123 --org=my-org --app=my-app --env=production --type=filesystem
 ```
 
 ### Non-Interactive Mode

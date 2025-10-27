@@ -71,9 +71,10 @@ export function backupCommand(program: Command) {
     .option('--org <org>', 'Organization ID')
     .option('--app <app>', 'Application ID')
     .option('--env <env>', 'Environment ID')
+    .option('--type <type>', 'Backup type: database or filesystem', 'database')
     .option('--output <path>', 'Output directory', './downloads')
     .option('--platform <platform>', 'platform to use (override active platform)')
-    .action(async (backupId: string | undefined, options: BackupOptions) => {
+    .action(async (backupId: string | undefined, options: BackupListOptions) => {
       await handleBackupDownload(backupId, options);
     });
 
@@ -83,8 +84,9 @@ export function backupCommand(program: Command) {
     .option('--org <org>', 'Organization ID')
     .option('--app <app>', 'Application ID')
     .option('--env <env>', 'Environment ID')
+    .option('--type <type>', 'Backup type: database or filesystem', 'database')
     .option('--platform <platform>', 'platform to use (override active platform)')
-    .action(async (options: BackupOptions) => {
+    .action(async (options: BackupListOptions) => {
       await handleBackupDelete(options);
     });
 
@@ -267,7 +269,7 @@ async function handleBackupCreate(options: BackupCreateOptions): Promise<void> {
   }
 }
 
-async function handleBackupDownload(backupId: string | undefined, options: BackupOptions): Promise<void> {
+async function handleBackupDownload(backupId: string | undefined, options: BackupListOptions): Promise<void> {
   try {
     const client = await ApiClient.create({
       org: options.org,
@@ -290,16 +292,17 @@ async function handleBackupDownload(backupId: string | undefined, options: Backu
     
     try {
       // First, get the list of backups
-      const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, 'database');
+      const backupType = (options.type || 'database') as 'database' | 'filesystem';
+      const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, backupType);
       const backups = listResponse.body?.backups || [];
       
       if (backups.length === 0) {
         spinner.fail('No backups found');
-        console.log(chalk.yellow('Create a backup first using: qc backup create'));
+        console.log(chalk.yellow(`Create a ${backupType} backup first using: qc backup create --type=${backupType}`));
         return;
       }
 
-      spinner.succeed(`Found ${backups.length} backups`);
+      spinner.succeed(`Found ${backups.length} ${backupType} backups`);
 
       let selectedBackupId: string;
 
@@ -359,7 +362,7 @@ async function handleBackupDownload(backupId: string | undefined, options: Backu
       
       try {
         // Step 1: Get download URL from API
-        const downloadResponse = await client.backupManagementApi.downloadBackup(orgId, appId, envId, 'database', selectedBackupId);
+        const downloadResponse = await client.backupManagementApi.downloadBackup(orgId, appId, envId, backupType, selectedBackupId);
         const downloadData = downloadResponse.body as any;
         
         if (!downloadData?.downloadUrl) {
@@ -466,7 +469,7 @@ function downloadFile(url: string, filePath: string): Promise<void> {
   });
 }
 
-async function handleBackupDelete(options: BackupOptions): Promise<void> {
+async function handleBackupDelete(options: BackupListOptions): Promise<void> {
   try {
     const client = await ApiClient.create({
       org: options.org,
@@ -485,20 +488,21 @@ async function handleBackupDelete(options: BackupOptions): Promise<void> {
       process.exit(1);
     }
 
+    const backupType = (options.type || 'database') as 'database' | 'filesystem';
     const spinner = createSpinner('Loading backups...');
     
     try {
       // First, get the list of backups
-      const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, 'database');
+      const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, backupType);
       const backups = listResponse.body?.backups || [];
       
       if (backups.length === 0) {
         spinner.fail('No backups found');
-        console.log(chalk.yellow('Create a backup first using: qc backup create'));
+        console.log(chalk.yellow(`Create a ${backupType} backup first using: qc backup create --type=${backupType}`));
         return;
       }
 
-      spinner.succeed(`Found ${backups.length} backups`);
+      spinner.succeed(`Found ${backups.length} ${backupType} backups`);
 
       // Let user select which backup to delete
       const choices = backups.map((backup: any, index: number) => {
@@ -548,7 +552,7 @@ async function handleBackupDelete(options: BackupOptions): Promise<void> {
       
       try {
         // Try to call deleteBackup method - we'll need to check if this exists in the API
-        await client.backupManagementApi.deleteBackup(orgId, appId, envId, 'database', selectedBackupId);
+        await client.backupManagementApi.deleteBackup(orgId, appId, envId, backupType, selectedBackupId);
         
         deleteSpinner.succeed('Backup deleted successfully!');
         
