@@ -1,0 +1,21 @@
+
+services:
+  quant-mock-api:
+    image: ghcr.io/quantcdn/quant-mock-api:4.0.0
+    container_name: quant-mock-api-test
+    ports:
+      - "4010:4010"
+    environment:
+      - LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4010"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+networks:
+  default:
+    name: quant-cli-testing
+    driver: bridge
+

@@ -14,6 +14,12 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "clean": "rimraf dist",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest --testPathIgnorePatterns=integration",
+    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.integration.cjs",
+    "test:all": "npm run test:unit && npm run test:integration",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
     "prepublishOnly": "npm run clean && npm run build",
     "release": "npm version patch && git push && git push --tags"
   },
@@ -39,7 +45,7 @@
     "url": "https://github.com/quantcdn/quant-cloud-cli/issues"
   },
   "dependencies": {
-    "@quantcdn/quant-client": "^3.0.0",
+    "@quantcdn/quant-client": "^4.0.0",
     "axios": "^1.6.0",
     "chalk": "^5.3.0",
     "commander": "^11.1.0",
@@ -59,12 +65,15 @@
     "@types/gradient-string": "^1.1.5",
     "@types/inquirer": "^9.0.9",
     "@types/inquirer-autocomplete-prompt": "^3.0.3",
+    "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.8.0",
     "@typescript-eslint/eslint-plugin": "^6.7.0",
     "@typescript-eslint/parser": "^6.7.0",
     "eslint": "^8.50.0",
+    "jest": "^30.2.0",
     "rimraf": "^5.0.5",
+    "ts-jest": "^29.4.5",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2"
   },

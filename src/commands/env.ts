@@ -546,7 +546,7 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
         spinner.succeed(`Environment '${targetEnvName}' created successfully!`);
         
         // Display created environment info
-        const createdEnv = response.body;
+        const createdEnv = response.data;
         logger.info(`${chalk.green('✓')} Environment: ${chalk.cyan(createdEnv.envName)}`);
         if (cloneFrom) {
           logger.info(`${chalk.gray('Cloned from:')} ${chalk.yellow(cloneFrom)}`);
@@ -695,27 +695,31 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
       environmentId
     );
     
+    // SDK incorrectly types this as void, but it actually returns data
+    // Cast to any to work around the SDK type issue
+    const data = response.data as any;
+    
     // The logs might be in different formats, let's handle various possibilities
-    if (response.body) {
+    if (data) {
       // If body is already parsed JSON
-      if (Array.isArray(response.body)) {
-        return response.body;
+      if (Array.isArray(data)) {
+        return data;
       }
       
       // If body has a logs property
-      if (response.body.logs && Array.isArray(response.body.logs)) {
-        return response.body.logs;
+      if (data.logs && Array.isArray(data.logs)) {
+        return data.logs;
       }
       
       // If body is a single log entry
-      if (response.body.message || response.body.timestamp) {
-        return [response.body];
+      if (data.message || data.timestamp) {
+        return [data];
       }
       
       // Try to parse as JSON string if it's a string
-      if (typeof response.body === 'string') {
+      if (typeof data === 'string') {
         try {
-          const parsed = JSON.parse(response.body);
+          const parsed = JSON.parse(data);
           if (Array.isArray(parsed)) {
             return parsed;
           }
@@ -725,7 +729,7 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
           return [parsed];
         } catch {
           // If parsing fails, treat as plain text logs
-          return [{ message: response.body, timestamp: new Date().toISOString() }];
+          return [{ message: data, timestamp: new Date().toISOString() }];
         }
       }
     }
@@ -898,14 +902,13 @@ async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {
         process.stdout.write(`\x1b[2;1H\x1b[K${chalk.gray('Application:')} ${chalk.cyan(appName)} | ${chalk.gray('Environment:')} ${chalk.cyan(targetEnvId)} | ${chalk.gray('Update:')} #${updateCount} | ${chalk.gray('Time:')} ${timestamp} ${chalk.gray(spinnerChar)}`);
         
         // Fetch fresh environment and metrics data
-        let currentEnv: any;
         let metricsData: any = {};
         
         const freshEnvironments = await client.getEnvironments({ 
           organizationId: options?.org,
           applicationId: options?.app
         });
-        currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
+        const currentEnv = freshEnvironments.find((env: any) => env.envName === targetEnvId);
         
         if (!currentEnv) {
           throw new Error('Environment not found');
