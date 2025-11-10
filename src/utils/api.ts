@@ -1,7 +1,7 @@
 import { getActivePlatformConfig } from './config.js';
 import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -23,18 +23,6 @@ export class ApiClient {
   private token: string;
 
   constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string) {
-    // Configure the APIs
-    this.applicationsApi = new ApplicationsApi(`${baseUrl}/api/v3`);
-    this.environmentsApi = new EnvironmentsApi(`${baseUrl}/api/v3`);
-    this.sshAccessApi = new SSHAccessApi(`${baseUrl}/api/v3`);
-    this.backupManagementApi = new BackupManagementApi(`${baseUrl}/api/v3`);
-    
-    this.baseUrl = baseUrl;
-    this.token = token;
-    this.defaultOrganizationId = defaultOrganizationId;
-    this.defaultApplicationId = defaultApplicationId;
-    this.defaultEnvironmentId = defaultEnvironmentId;
-
     // Set authentication headers
     const defaultHeaders = {
       'Authorization': `Bearer ${token}`,
@@ -45,10 +33,25 @@ export class ApiClient {
       ...(defaultEnvironmentId && { 'X-Environment': defaultEnvironmentId }),
     };
 
-    this.applicationsApi.defaultHeaders = defaultHeaders;
-    this.environmentsApi.defaultHeaders = defaultHeaders;
-    this.sshAccessApi.defaultHeaders = defaultHeaders;
-    this.backupManagementApi.defaultHeaders = defaultHeaders;
+    // Configure the APIs with Configuration object
+    const config = new Configuration({
+      basePath: baseUrl,
+      accessToken: token,
+      baseOptions: {
+        headers: defaultHeaders
+      }
+    });
+
+    this.applicationsApi = new ApplicationsApi(config);
+    this.environmentsApi = new EnvironmentsApi(config);
+    this.sshAccessApi = new SSHAccessApi(config);
+    this.backupManagementApi = new BackupManagementApi(config);
+    
+    this.baseUrl = baseUrl;
+    this.token = token;
+    this.defaultOrganizationId = defaultOrganizationId;
+    this.defaultApplicationId = defaultApplicationId;
+    this.defaultEnvironmentId = defaultEnvironmentId;
   }
 
   static async create(contextOverrides: ContextOverrides = {}): Promise<ApiClient> {
@@ -78,7 +81,7 @@ export class ApiClient {
 
     try {
       const response = await this.applicationsApi.listApplications(organizationId);
-      return response.body;
+      return response.data;
     } catch (error: any) {
       // Provide friendly error messages instead of debug dumps
       if (error.statusCode === 404) {
@@ -107,7 +110,7 @@ export class ApiClient {
 
     try {
       const response = await this.environmentsApi.listEnvironments(organizationId, applicationId);
-      return response.body;
+      return response.data;
     } catch (error: any) {
       // Provide friendly error messages instead of debug dumps
       if (error.statusCode === 404) {
@@ -135,7 +138,7 @@ export class ApiClient {
     // OAuth user info is fetched directly, not through the TypeScript client
     // This endpoint is not part of the v3 API, it's part of the OAuth system
     try {
-      const response = await fetch(`${this.applicationsApi.basePath.replace('/api/v3', '')}/api/oauth/user`, {
+      const response = await fetch(`${this.baseUrl}/api/oauth/user`, {
         headers: {
           'Authorization': `Bearer ${this.token}`,
           'Accept': 'application/json'
@@ -172,7 +175,7 @@ export class ApiClient {
 
     try {
       const response = await this.environmentsApi.getEnvironmentMetrics(organizationId, applicationId, options.environmentId);
-      return response.body;
+      return response.data;
     } catch (error: any) {
       // Provide friendly error messages instead of debug dumps
       if (error.statusCode === 404) {

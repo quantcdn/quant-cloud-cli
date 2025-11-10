@@ -86,7 +86,7 @@ async function handleSSH(options: SSHOptions) {
     let sshAccess: any;
     try {
       const sshAccessResponse = await client.sshAccessApi.getSshAccessCredentials(orgId, appId, envId);
-      sshAccess = sshAccessResponse.body;
+      sshAccess = sshAccessResponse.data;
     } catch (apiError: any) {
       throw new Error(`SSH access request failed: ${apiError.message || 'Unknown API error'}`);
     }
