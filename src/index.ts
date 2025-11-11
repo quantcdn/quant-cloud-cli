@@ -9,10 +9,12 @@ import { logoutCommand } from './commands/logout.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { orgCommand } from './commands/org.js';
 import { appCommand } from './commands/app.js';
+import { projectCommand } from './commands/project.js';
 import { envCommand } from './commands/env.js';
 import { sshCommand } from './commands/ssh.js';
 import { platformCommand } from './commands/platform.js';
 import { backupCommand } from './commands/backup.js';
+import { vrtCommand } from './commands/vrt.js';
 import { getActivePlatformConfig } from './utils/config.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -107,10 +109,12 @@ async function main() {
       whoamiCommand(program);
       orgCommand(program);
       appCommand(program);
+      projectCommand(program);
       envCommand(program);
       platformCommand(program);
       program.addCommand(sshCommand);
       program.addCommand(backupCommand(program));
+      vrtCommand(program);
 
   // Global error handling
   process.on('uncaughtException', (error) => {

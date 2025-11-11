@@ -13,6 +13,7 @@ Command-line interface for Quant Cloud Platform integration and management.
 - **Log Streaming** - Live log tailing with follow mode
 - **SSH Access** - Direct terminal access to cloud environments via AWS ECS Exec with interactive shells and one-shot commands
 - **Backup Management** - Create, list, download, and delete environment backups
+- **Visual Regression Testing** - Automated visual comparison between Quant projects and remote URLs with Playwright
 - **Secure OAuth Authentication** - Browser-based login flow with PKCE security
 - **Non-Interactive Mode** - All commands support context overrides via CLI flags for automation
 
@@ -116,6 +117,9 @@ qc env list                     # Still finds .quant.yml at project root
 - `qc app select [appId]` - Switch to application (auto-prompts for environment)
 - `qc app current` - Show current application context
 
+### Projects
+- `qc project list` - List Quant projects in current organization
+
 ### Environments
 - `qc env list` - List environments in current application
 - `qc env select [envId]` - Switch to environment with searchable selection
@@ -186,6 +190,70 @@ qc backup download backup-2024-01-15-abc123 --output=./my-backups --type=databas
 qc backup create --org=my-org --app=my-app --env=production --type=database --description="Automated backup"
 qc backup download backup-123 --org=my-org --app=my-app --env=production --type=filesystem
 ```
+
+### Visual Regression Testing (VRT)
+
+Run automated visual regression testing to compare Quant projects against remote URLs using Playwright and Chromium.
+
+- `qc vrt` - Run VRT for all configured projects
+- `qc vrt --project=project1,project2` - Run VRT for specific projects
+- `qc vrt --threshold=0.05` - Set pixel difference threshold (0-1, default: 0.01)
+- `qc vrt --max-pages=20` - Set maximum pages to crawl per project
+- `qc vrt --max-depth=5` - Set maximum crawl depth
+- `qc vrt --csv=report.csv` - Generate CSV report
+- `qc vrt --output-dir=./screenshots` - Set screenshot output directory
+- `qc vrt --quant-auth=user:pass` - Basic auth for Quant URLs
+- `qc vrt --remote-auth=user:pass` - Basic auth for remote URLs
+
+**Configuration:** Create `~/.quant/vrt-config.json` with project mappings:
+
+```json
+{
+  "projects": {
+    "simple-project": "https://example.com",
+    "project-with-auth": {
+      "url": "https://example2.com",
+      "remoteAuth": "user:pass",
+      "quantAuth": "user:pass"
+    }
+  },
+  "threshold": 0.01,
+  "maxPages": 10,
+  "maxDepth": 3,
+  "quantAuth": "default-user:default-pass",
+  "remoteAuth": "default-user:default-pass"
+}
+```
+
+**Note:** 
+- Projects can be defined as simple URLs (strings) or objects with per-project auth
+- Global `quantAuth`/`remoteAuth` apply to all projects unless overridden at project level
+- CLI flags (`--quant-auth`, `--remote-auth`) override all config values
+
+**Examples:**
+
+```bash
+# Run VRT for all configured projects
+qc vrt
+
+# Run for specific projects
+qc vrt --project=my-project
+
+# Run with custom threshold and generate CSV
+qc vrt --threshold=0.02 --csv=vrt-report.csv
+
+# Run with authentication
+qc vrt --quant-auth=user:pass --remote-auth=user:pass
+
+# Run with custom limits
+qc vrt --max-pages=50 --max-depth=5 --output-dir=./my-screenshots
+```
+
+**Output:**
+- Console summary with pass/fail status per page
+- Screenshot diffs saved to `./vrt-results/{project}/{date}/`
+- Optional CSV report with detailed results
+- Exit code 1 if any tests fail
 
 ### Non-Interactive Mode
 
