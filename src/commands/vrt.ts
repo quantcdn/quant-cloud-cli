@@ -114,7 +114,24 @@ async function handleVRT(options: VRTOptions) {
       browser = await chromium.launch({ headless: true });
 
       for (const projectName of projectsToTest) {
-        const remoteUrl = config.projects[projectName];
+        const projectConfig = config.projects[projectName];
+        
+        // Support both simple string and complex object format
+        let remoteUrl: string;
+        let projectQuantAuth: string | undefined;
+        let projectRemoteAuth: string | undefined;
+        
+        if (typeof projectConfig === 'string') {
+          remoteUrl = projectConfig;
+          projectQuantAuth = quantAuth;
+          projectRemoteAuth = remoteAuth;
+        } else {
+          remoteUrl = projectConfig.url;
+          // Project-specific auth overrides global auth
+          projectQuantAuth = projectConfig.quantAuth || quantAuth;
+          projectRemoteAuth = projectConfig.remoteAuth || remoteAuth;
+        }
+        
         logger.info(`\n${chalk.bold(`Testing project: ${chalk.cyan(projectName)}`)}`);
         
         const projectResults = await runProjectVRT(
@@ -127,8 +144,8 @@ async function handleVRT(options: VRTOptions) {
             maxPages,
             maxDepth,
             outputDir,
-            quantAuth,
-            remoteAuth
+            quantAuth: projectQuantAuth,
+            remoteAuth: projectRemoteAuth
           }
         );
 

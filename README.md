@@ -210,18 +210,25 @@ Run automated visual regression testing to compare Quant projects against remote
 ```json
 {
   "projects": {
-    "my-project": "https://example.com",
-    "another-project": "https://another-example.com"
+    "simple-project": "https://example.com",
+    "project-with-auth": {
+      "url": "https://example2.com",
+      "remoteAuth": "user:pass",
+      "quantAuth": "user:pass"
+    }
   },
   "threshold": 0.01,
   "maxPages": 10,
   "maxDepth": 3,
-  "quantAuth": "username:password",
-  "remoteAuth": "username:password"
+  "quantAuth": "default-user:default-pass",
+  "remoteAuth": "default-user:default-pass"
 }
 ```
 
-**Note:** Auth credentials in config are optional. CLI flags (`--quant-auth`, `--remote-auth`) override config values.
+**Note:** 
+- Projects can be defined as simple URLs (strings) or objects with per-project auth
+- Global `quantAuth`/`remoteAuth` apply to all projects unless overridden at project level
+- CLI flags (`--quant-auth`, `--remote-auth`) override all config values
 
 **Examples:**
 

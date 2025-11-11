@@ -7,8 +7,14 @@ const CONFIG_DIR = join(homedir(), '.quant');
 export const CONFIG_FILE = join(CONFIG_DIR, 'credentials');
 export const VRT_CONFIG_FILE = join(CONFIG_DIR, 'vrt-config.json');
 
+export interface VRTProjectConfig {
+  url: string;
+  remoteAuth?: string;
+  quantAuth?: string;
+}
+
 export interface VRTProjectMapping {
-  [projectMachineName: string]: string; // machine name -> remote URL
+  [projectMachineName: string]: string | VRTProjectConfig; // machine name -> remote URL or config object
 }
 
 export interface VRTConfig {
@@ -16,8 +22,8 @@ export interface VRTConfig {
   threshold?: number; // Default threshold (0-1)
   maxPages?: number; // Max pages to crawl per project
   maxDepth?: number; // Max crawl depth
-  quantAuth?: string; // Basic auth for Quant URLs (username:password)
-  remoteAuth?: string; // Basic auth for remote URLs (username:password)
+  quantAuth?: string; // Default basic auth for Quant URLs (username:password)
+  remoteAuth?: string; // Default basic auth for remote URLs (username:password)
 }
 
 export async function ensureConfigDir(): Promise<void> {
