@@ -5,6 +5,20 @@ import { AuthConfig, MultiPlatformConfig, PlatformInfo } from '../types/auth.js'
 
 const CONFIG_DIR = join(homedir(), '.quant');
 export const CONFIG_FILE = join(CONFIG_DIR, 'credentials');
+export const VRT_CONFIG_FILE = join(CONFIG_DIR, 'vrt-config.json');
+
+export interface VRTProjectMapping {
+  [projectMachineName: string]: string; // machine name -> remote URL
+}
+
+export interface VRTConfig {
+  projects: VRTProjectMapping;
+  threshold?: number; // Default threshold (0-1)
+  maxPages?: number; // Max pages to crawl per project
+  maxDepth?: number; // Max crawl depth
+  quantAuth?: string; // Basic auth for Quant URLs (username:password)
+  remoteAuth?: string; // Basic auth for remote URLs (username:password)
+}
 
 export async function ensureConfigDir(): Promise<void> {
   try {
@@ -210,4 +224,35 @@ export async function saveActivePlatformConfig(updates: Partial<AuthConfig>): Pr
 // Backward compatibility - update existing functions to use active platform
 export async function loadAuthConfigCompat(): Promise<AuthConfig | null> {
   return await getActivePlatformConfig();
+}
+
+// VRT configuration management
+export async function loadVRTConfig(): Promise<VRTConfig | null> {
+  try {
+    const data = await fs.readFile(VRT_CONFIG_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveVRTConfig(config: VRTConfig): Promise<void> {
+  await ensureConfigDir();
+  await fs.writeFile(VRT_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+export async function addVRTProject(machineName: string, remoteUrl: string): Promise<void> {
+  const config = await loadVRTConfig() || { projects: {} };
+  config.projects[machineName] = remoteUrl;
+  await saveVRTConfig(config);
+}
+
+export async function removeVRTProject(machineName: string): Promise<boolean> {
+  const config = await loadVRTConfig();
+  if (!config || !config.projects[machineName]) {
+    return false;
+  }
+  delete config.projects[machineName];
+  await saveVRTConfig(config);
+  return true;
 }

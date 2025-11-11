@@ -1,7 +1,7 @@
 import { getActivePlatformConfig } from './config.js';
 import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, Configuration } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -16,6 +16,7 @@ export class ApiClient {
   public environmentsApi: EnvironmentsApi;
   public sshAccessApi: SSHAccessApi;
   public backupManagementApi: BackupManagementApi;
+  private projectsApi: ProjectsApi;
   public baseUrl: string;
   private defaultOrganizationId?: string;
   private defaultApplicationId?: string;
@@ -46,6 +47,7 @@ export class ApiClient {
     this.environmentsApi = new EnvironmentsApi(config);
     this.sshAccessApi = new SSHAccessApi(config);
     this.backupManagementApi = new BackupManagementApi(config);
+    this.projectsApi = new ProjectsApi(config);
     
     this.baseUrl = baseUrl;
     this.token = token;
@@ -186,6 +188,56 @@ export class ApiClient {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch metrics: ${error.message || 'Network error'}`);
+      }
+    }
+  }
+
+  async getProjects(apiOptions?: ApiOptions): Promise<any[]> {
+    const organizationId = apiOptions?.organizationId || this.defaultOrganizationId;
+    
+    if (!organizationId) {
+      throw new Error('Organization not found or no access to projects.\nUse quant-cloud org list to see available organizations');
+    }
+
+    try {
+      const response = await this.projectsApi.projectsList(organizationId);
+      return response.data;
+    } catch (error: any) {
+      // Provide friendly error messages
+      if (error.statusCode === 404 || error.response?.status === 404) {
+        throw new Error(`Organization '${organizationId}' not found or no access to projects.`);
+      } else if (error.statusCode === 403 || error.response?.status === 403) {
+        throw new Error(`Access denied to projects in organization '${organizationId}'.`);
+      } else if (error.statusCode === 401 || error.response?.status === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch projects: ${error.message || 'Network error'}`);
+      }
+    }
+  }
+
+  async getProjectDetails(projectName: string): Promise<any> {
+    const organizationId = this.defaultOrganizationId;
+    
+    if (!organizationId) {
+      throw new Error('Organization not found. Use quant-cloud org list to see available organizations');
+    }
+
+    try {
+      // Fetch project details - for standard Quant projects, this will return the project domain
+      // withToken=false means we don't need the project token in the response
+      const response = await this.projectsApi.projectsRead(organizationId, projectName, false);
+      return response.data;
+    } catch (error: any) {
+      // Provide friendly error messages
+      if (error.statusCode === 404 || error.response?.status === 404) {
+        throw new Error(`Project '${projectName}' not found in organization '${organizationId}'.`);
+      } else if (error.statusCode === 403 || error.response?.status === 403) {
+        throw new Error(`Access denied to project '${projectName}'.`);
+      } else if (error.statusCode === 401 || error.response?.status === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch project details: ${error.message || 'Network error'}`);
       }
     }
   }
