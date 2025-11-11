@@ -45,13 +45,13 @@ export function vrtCommand(program: Command) {
     .command('vrt')
     .description('Run visual regression testing against Quant projects')
     .option('--project <project>', 'specific project to test (comma-separated for multiple)')
-    .option('--threshold <threshold>', 'pixel difference threshold (0-1)', '0.01')
-    .option('--max-pages <maxPages>', 'maximum pages to crawl per project', '10')
-    .option('--max-depth <maxDepth>', 'maximum crawl depth', '3')
+    .option('--threshold <threshold>', 'pixel difference threshold (0-1)')
+    .option('--max-pages <maxPages>', 'maximum pages to crawl per project')
+    .option('--max-depth <maxDepth>', 'maximum crawl depth')
     .option('--csv <file>', 'output CSV report file')
     .option('--quant-auth <credentials>', 'basic auth for Quant URLs (user:pass)')
     .option('--remote-auth <credentials>', 'basic auth for remote URLs (user:pass)')
-    .option('--output-dir <dir>', 'output directory for screenshots', './vrt-results')
+    .option('--output-dir <dir>', 'output directory for screenshots')
     .action(async (options: VRTOptions) => {
       await handleVRT(options);
     });
@@ -92,10 +92,10 @@ async function handleVRT(options: VRTOptions) {
       process.exit(1);
     }
 
-    // Parse options (CLI flags override config file)
+    // Parse options (CLI flags override config file)    
     const threshold = parseFloat(options.threshold || config.threshold?.toString() || '0.01');
-    const maxPages = parseInt(options.maxPages || config.maxPages?.toString() || '10', 10);
-    const maxDepth = parseInt(options.maxDepth || config.maxDepth?.toString() || '3', 10);
+    const maxPages = parseInt(options.maxPages || (config.maxPages !== undefined ? config.maxPages.toString() : '10'), 10);
+    const maxDepth = parseInt(options.maxDepth || (config.maxDepth !== undefined ? config.maxDepth.toString() : '3'), 10);
     const outputDir = options.outputDir || './vrt-results';
     const quantAuth = options.quantAuth || config.quantAuth;
     const remoteAuth = options.remoteAuth || config.remoteAuth;
