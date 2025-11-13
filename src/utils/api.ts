@@ -1,7 +1,7 @@
 import { getActivePlatformConfig } from './config.js';
 import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, Configuration } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, CrawlersApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -17,6 +17,7 @@ export class ApiClient {
   public sshAccessApi: SSHAccessApi;
   public backupManagementApi: BackupManagementApi;
   private projectsApi: ProjectsApi;
+  public crawlersApi: CrawlersApi;
   public baseUrl: string;
   private defaultOrganizationId?: string;
   private defaultApplicationId?: string;
@@ -48,6 +49,7 @@ export class ApiClient {
     this.sshAccessApi = new SSHAccessApi(config);
     this.backupManagementApi = new BackupManagementApi(config);
     this.projectsApi = new ProjectsApi(config);
+    this.crawlersApi = new CrawlersApi(config);
     
     this.baseUrl = baseUrl;
     this.token = token;
@@ -238,6 +240,79 @@ export class ApiClient {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch project details: ${error.message || 'Network error'}`);
+      }
+    }
+  }
+
+  async getCrawlers(projectName: string): Promise<any[]> {
+    const organizationId = this.defaultOrganizationId;
+    
+    if (!organizationId) {
+      throw new Error('Organization not found. Use quant-cloud org list to see available organizations');
+    }
+
+    try {
+      const response = await this.crawlersApi.crawlersList(organizationId, projectName);
+      return response.data;
+    } catch (error: any) {
+      if (error.statusCode === 404 || error.response?.status === 404) {
+        throw new Error(`Project '${projectName}' not found or has no crawlers.`);
+      } else if (error.statusCode === 403 || error.response?.status === 403) {
+        throw new Error(`Access denied to crawlers for project '${projectName}'.`);
+      } else if (error.statusCode === 401 || error.response?.status === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+      } else {
+        throw new Error(`Failed to fetch crawlers: ${error.message || 'Network error'}`);
+      }
+    }
+  }
+
+  async runCrawler(projectName: string, crawlerId: string, urls?: string[]): Promise<any> {
+    const organizationId = this.defaultOrganizationId;
+    
+    if (!organizationId) {
+      throw new Error('Organization not found. Use quant-cloud org list to see available organizations');
+    }
+
+    try {
+      // NOTE: Using direct fetch() call as workaround
+      // The crawlersRun method is available in quant-ts-client commit fba13989a1f84e87fc16b431f77bb4d83b5970fa
+      // but that commit has build issues preventing npm install.
+      // Once the SDK is properly published with the crawlersRun method, replace this with:
+      // const response = await this.crawlersApi.crawlersRun(organizationId, projectName, crawlerId, payload);
+      const payload = urls ? { urls } : {};
+      const response = await fetch(
+        `${this.baseUrl}/api/v2/organizations/${organizationId}/projects/${projectName}/crawlers/${crawlerId}/run`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`Crawler '${crawlerId}' not found in project '${projectName}'.`);
+        } else if (response.status === 403) {
+          throw new Error(`Access denied to run crawler '${crawlerId}'.`);
+        } else if (response.status === 401) {
+          throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
+        } else {
+          const errorText = await response.text();
+          throw new Error(`Failed to run crawler: ${response.status} ${errorText}`);
+        }
+      }
+
+      return await response.json();
+    } catch (error: any) {
+      if (error.message?.includes('Crawler') || error.message?.includes('Authentication')) {
+        throw error; // Re-throw our friendly errors
+      } else {
+        throw new Error(`Failed to run crawler: ${error.message || 'Network error'}`);
       }
     }
   }
