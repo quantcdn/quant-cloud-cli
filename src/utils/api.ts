@@ -275,42 +275,16 @@ export class ApiClient {
     }
 
     try {
-      // NOTE: Using direct fetch() call as workaround
-      // The crawlersRun method is available in quant-ts-client commit fba13989a1f84e87fc16b431f77bb4d83b5970fa
-      // but that commit has build issues preventing npm install.
-      // Once the SDK is properly published with the crawlersRun method, replace this with:
-      // const response = await this.crawlersApi.crawlersRun(organizationId, projectName, crawlerId, payload);
-      const payload = urls ? { urls } : {};
-      const response = await fetch(
-        `${this.baseUrl}/api/v2/organizations/${organizationId}/projects/${projectName}/crawlers/${crawlerId}/run`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.token}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        }
-      );
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`Crawler '${crawlerId}' not found in project '${projectName}'.`);
-        } else if (response.status === 403) {
-          throw new Error(`Access denied to run crawler '${crawlerId}'.`);
-        } else if (response.status === 401) {
-          throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
-        } else {
-          const errorText = await response.text();
-          throw new Error(`Failed to run crawler: ${response.status} ${errorText}`);
-        }
-      }
-
-      return await response.json();
+      const payload = urls && urls.length > 0 ? { urls } : {};
+      const response = await this.crawlersApi.crawlersRun(organizationId, projectName, crawlerId, payload);
+      return response.data;
     } catch (error: any) {
-      if (error.message?.includes('Crawler') || error.message?.includes('Authentication')) {
-        throw error; // Re-throw our friendly errors
+      if (error.statusCode === 404 || error.response?.status === 404) {
+        throw new Error(`Crawler '${crawlerId}' not found in project '${projectName}'.`);
+      } else if (error.statusCode === 403 || error.response?.status === 403) {
+        throw new Error(`Access denied to run crawler '${crawlerId}'.`);
+      } else if (error.statusCode === 401 || error.response?.status === 401) {
+        throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to run crawler: ${error.message || 'Network error'}`);
       }
