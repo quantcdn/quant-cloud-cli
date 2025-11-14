@@ -8,6 +8,7 @@ export interface AuthConfig {
   activeOrganization?: string;
   activeApplication?: string;
   activeEnvironment?: string;
+  activeProject?: string;
 }
 
 export interface PlatformInfo {

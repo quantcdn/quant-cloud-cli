@@ -15,6 +15,7 @@ import { sshCommand } from './commands/ssh.js';
 import { platformCommand } from './commands/platform.js';
 import { backupCommand } from './commands/backup.js';
 import { vrtCommand } from './commands/vrt.js';
+import { crawlerCommand } from './commands/crawler.js';
 import { getActivePlatformConfig } from './utils/config.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -70,9 +71,15 @@ async function displayContext() {
     }
     
     if (auth.activeEnvironment) {
-      console.log(chalk.gray('└─ Environment: ') + chalk.yellow(auth.activeEnvironment));
+      console.log(chalk.gray('├─ Environment: ') + chalk.yellow(auth.activeEnvironment));
     } else {
-      console.log(chalk.gray('└─ Environment: ') + chalk.red('None selected'));
+      console.log(chalk.gray('├─ Environment: ') + chalk.red('None selected'));
+    }
+    
+    if (auth.activeProject) {
+      console.log(chalk.gray('└─ Project: ') + chalk.blue(auth.activeProject));
+    } else {
+      console.log(chalk.gray('└─ Project: ') + chalk.red('None selected'));
     }
     
     console.log(); // Empty line before help
@@ -115,6 +122,7 @@ async function main() {
       program.addCommand(sshCommand);
       program.addCommand(backupCommand(program));
       vrtCommand(program);
+      crawlerCommand(program);
 
   // Global error handling
   process.on('uncaughtException', (error) => {
