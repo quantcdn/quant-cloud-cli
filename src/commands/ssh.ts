@@ -24,7 +24,7 @@ export const sshCommand = new Command('ssh')
   .description('Connect to environment container via SSH')
   .option('--container <name>', 'specific container to connect to')
   .option('--org <org>', 'organization machine name')
-  .option('--app <app>', 'application machine name') 
+  .option('--app <app>', 'application machine name')
   .option('--env <env>', 'environment name')
   .option('--command <cmd>', 'command to run (default: /bin/bash for interactive shell)')
   .option('--interactive', 'force interactive mode (only needed with --command)')
@@ -33,14 +33,14 @@ export const sshCommand = new Command('ssh')
 
 async function handleSSH(options: SSHOptions) {
   const spinner = createSpinner('Checking SSH access...');
-  
+
   try {
     // Log non-interactive mode parameters for validation
     const hasNonInteractiveParams = options.org || options.app || options.env || options.container;
     if (hasNonInteractiveParams) {
       console.log(chalk.gray(`🔧 Non-interactive mode: org=${options.org || 'auto'}, app=${options.app || 'auto'}, env=${options.env || 'auto'}, container=${options.container || 'auto'}`));
     }
-    
+
     const auth = await getActivePlatformConfig();
     if (!auth || !auth.token) {
       spinner.fail('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -61,7 +61,7 @@ async function handleSSH(options: SSHOptions) {
       env: options.env,
       platform: options.platform
     });
-    
+
     // Resolve context
     const orgId = options.org || auth.activeOrganization;
     const appId = options.app || auth.activeApplication;
@@ -82,7 +82,7 @@ async function handleSSH(options: SSHOptions) {
 
     // Request SSH access
     spinner.text = 'Requesting SSH access credentials...';
-    
+
     let sshAccess: any;
     try {
       const sshAccessResponse = await client.sshAccessApi.getSshAccessCredentials(orgId, appId, envId);
@@ -90,7 +90,7 @@ async function handleSSH(options: SSHOptions) {
     } catch (apiError: any) {
       throw new Error(`SSH access request failed: ${apiError.message || 'Unknown API error'}`);
     }
-    
+
     if (!sshAccess.success) {
       spinner.fail('SSH access denied or environment not available for SSH.');
       return;
@@ -127,14 +127,14 @@ async function handleSSH(options: SSHOptions) {
       spinner.fail('No container specified.');
       return;
     }
-    
+
     if (!sshAccess.containerNames || !sshAccess.containerNames.includes(containerName)) {
       spinner.fail(`Container '${containerName}' not found. Available: ${sshAccess.containerNames?.join(', ') || 'none'}`);
       return;
     }
 
     spinner.text = 'Connecting to container...';
-    
+
     // Display connection info
     spinner.succeed('SSH access granted!');
     console.log();
@@ -171,7 +171,12 @@ async function checkAWSCLI(): Promise<boolean> {
 }
 
 
-async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: string, command?: string, forceInteractive?: boolean): Promise<void> {
+async function executeAWSCommand(
+  sshAccess: SSHAccessResponse,
+  containerName: string,
+  command?: string,
+  forceInteractive?: boolean
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!sshAccess.credentials) {
       reject(new Error('No credentials available'));
@@ -192,9 +197,9 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
     // - With command + --interactive: interactive
     const targetCommand = command || '/bin/bash';
     const isInteractive = !command || forceInteractive;
-    
+
     if (command) {
-      if (forceInteractive) {
+      if (isInteractive) {
         console.log(chalk.gray(`Running interactive command: ${targetCommand}`));
       } else {
         console.log(chalk.gray(`Running command: ${targetCommand}`));
@@ -208,20 +213,27 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
       '--cluster', sshAccess.clusterName || '',
       '--task', sshAccess.taskArn || '',
       '--container', containerName,
-      '--command', targetCommand
+      '--command', targetCommand,
+      '--interactive'
     ];
 
-    // ECS cluster only supports interactive mode currently
-    // Always use --interactive, but command vs shell behavior is handled by targetCommand
-    args.push('--interactive');
+    // ^C ignored in the parent process ---
+    const sigintHandler = () => {
+      // no-op
+    };
+    process.on('SIGINT', sigintHandler);
 
-    const child = spawn('aws', args, { 
+    // AWS CLI new process
+    const child = spawn('aws', args, {
       env,
       stdio: 'inherit',
-      shell: false
+      shell: false,
     });
 
     child.on('close', (code) => {
+      // Remove SIGINT handler
+      process.removeListener('SIGINT', sigintHandler);
+
       console.log();
       if (code === 0) {
         console.log(chalk.green('✅ Command completed successfully'));
@@ -232,6 +244,7 @@ async function executeAWSCommand(sshAccess: SSHAccessResponse, containerName: st
     });
 
     child.on('error', (error) => {
+      process.removeListener('SIGINT', sigintHandler);
       reject(new Error(`Failed to execute AWS CLI: ${error.message}`));
     });
   });
