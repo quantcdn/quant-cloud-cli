@@ -335,9 +335,9 @@ async function crawlPages(
         // Only crawl deeper if we haven't reached max depth
         if (depth < maxDepth && pages.length < maxPages) {
           // Find all links on the page
-          const links = await page.$$eval('a[href]', (anchors, base) => {
+          const links = await page.$$eval('a[href]', (anchors: HTMLAnchorElement[], base: string) => {
             return anchors
-              .map(a => {
+              .map((a: HTMLAnchorElement) => {
                 try {
                   const href = a.getAttribute('href');
                   if (!href) return null;

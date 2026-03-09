@@ -1,10 +1,14 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
 import { createSpinner } from '../utils/spinner.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { getActivePlatformConfig } from '../utils/config.js';
+
+// Register the autocomplete prompt
+inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
 
 const logger = new Logger('Crawler');
 
@@ -69,18 +73,37 @@ async function handleCrawlerRun(crawlerId?: string, options?: CrawlerOptions) {
       }
 
       if (projects.length === 1) {
-        projectName = projects[0].name || projects[0].machine_name;
+        projectName = projects[0].machine_name;
         logger.info(`Using project: ${chalk.cyan(projectName)}`);
       } else {
+        const projectChoices = projects.map((p: any) => ({
+          name: `${p.name || p.machine_name} ${p.url ? chalk.gray(`(${p.url})`) : ''}`,
+          value: p.machine_name // Always use machine_name for API calls
+        }));
+
         const { selectedProject } = await inquirer.prompt([
           {
-            type: 'list',
+            type: 'autocomplete',
             name: 'selectedProject',
-            message: 'Select a project:',
-            choices: projects.map((p: any) => ({
-              name: `${p.name || p.machine_name} ${p.url ? chalk.gray(`(${p.url})`) : ''}`,
-              value: p.name || p.machine_name
-            }))
+            message: 'Select a project (type to filter):',
+            source: async (answersSoFar: any, input: string) => {
+              if (!input) {
+                return projectChoices;
+              }
+              
+              // Filter projects based on user input
+              const filtered = projectChoices.filter((choice: any) => 
+                choice.name.toLowerCase().includes(input.toLowerCase()) ||
+                choice.value.toLowerCase().includes(input.toLowerCase())
+              );
+              
+              return filtered.length > 0 ? filtered : [
+                { name: chalk.red(`No projects matching "${input}"`), value: null, disabled: true }
+              ];
+            },
+            pageSize: 10,
+            searchText: 'Searching...',
+            emptyText: 'No projects found'
           }
         ]);
         projectName = selectedProject;
@@ -108,15 +131,34 @@ async function handleCrawlerRun(crawlerId?: string, options?: CrawlerOptions) {
         crawlerId = crawlers[0].uuid || crawlers[0].machine_name;
         logger.info(`Using crawler: ${chalk.cyan(crawlerId)}`);
       } else {
+        const crawlerChoices = crawlers.map((c: any) => ({
+          name: `${c.name || c.machine_name} ${c.description ? chalk.gray(`(${c.description})`) : ''}`,
+          value: c.uuid || c.machine_name
+        }));
+
         const { selectedCrawler } = await inquirer.prompt([
           {
-            type: 'list',
+            type: 'autocomplete',
             name: 'selectedCrawler',
-            message: 'Select a crawler:',
-            choices: crawlers.map((c: any) => ({
-              name: `${c.name || c.machine_name} ${c.description ? chalk.gray(`(${c.description})`) : ''}`,
-              value: c.uuid || c.machine_name
-            }))
+            message: 'Select a crawler (type to filter):',
+            source: async (answersSoFar: any, input: string) => {
+              if (!input) {
+                return crawlerChoices;
+              }
+              
+              // Filter crawlers based on user input
+              const filtered = crawlerChoices.filter((choice: any) => 
+                choice.name.toLowerCase().includes(input.toLowerCase()) ||
+                choice.value.toLowerCase().includes(input.toLowerCase())
+              );
+              
+              return filtered.length > 0 ? filtered : [
+                { name: chalk.red(`No crawlers matching "${input}"`), value: null, disabled: true }
+              ];
+            },
+            pageSize: 10,
+            searchText: 'Searching...',
+            emptyText: 'No crawlers found'
           }
         ]);
         crawlerId = selectedCrawler;
@@ -181,18 +223,37 @@ async function handleCrawlerList(options?: CrawlerOptions) {
       }
 
       if (projects.length === 1) {
-        projectName = projects[0].name || projects[0].machine_name;
+        projectName = projects[0].machine_name;
         logger.info(`Using project: ${chalk.cyan(projectName)}`);
       } else {
+        const projectChoices = projects.map((p: any) => ({
+          name: `${p.name || p.machine_name} ${p.url ? chalk.gray(`(${p.url})`) : ''}`,
+          value: p.machine_name // Always use machine_name for API calls
+        }));
+
         const { selectedProject } = await inquirer.prompt([
           {
-            type: 'list',
+            type: 'autocomplete',
             name: 'selectedProject',
-            message: 'Select a project:',
-            choices: projects.map((p: any) => ({
-              name: `${p.name || p.machine_name} ${p.url ? chalk.gray(`(${p.url})`) : ''}`,
-              value: p.name || p.machine_name
-            }))
+            message: 'Select a project (type to filter):',
+            source: async (answersSoFar: any, input: string) => {
+              if (!input) {
+                return projectChoices;
+              }
+              
+              // Filter projects based on user input
+              const filtered = projectChoices.filter((choice: any) => 
+                choice.name.toLowerCase().includes(input.toLowerCase()) ||
+                choice.value.toLowerCase().includes(input.toLowerCase())
+              );
+              
+              return filtered.length > 0 ? filtered : [
+                { name: chalk.red(`No projects matching "${input}"`), value: null, disabled: true }
+              ];
+            },
+            pageSize: 10,
+            searchText: 'Searching...',
+            emptyText: 'No projects found'
           }
         ]);
         projectName = selectedProject;

@@ -116,7 +116,18 @@ async function handleBackupList(options: BackupListOptions): Promise<void> {
     
     try {
       const backupType = (options.type || 'database') as 'database' | 'filesystem';
-      const response = await client.backupManagementApi.listBackups(orgId, appId, envId, backupType);
+      const response = await client.backupManagementApi.listBackups(
+        orgId, 
+        appId, 
+        envId, 
+        backupType,
+        undefined, // order
+        undefined, // limit
+        undefined, // createdBefore
+        undefined, // createdAfter
+        undefined, // status
+        undefined, // nextToken
+      );
       const backups = response.data?.backups || [];
       
       spinner.succeed(`Found ${backups.length} backups`);
@@ -293,7 +304,18 @@ async function handleBackupDownload(backupId: string | undefined, options: Backu
     try {
       // First, get the list of backups
       const backupType = (options.type || 'database') as 'database' | 'filesystem';
-      const listResponse = await client.backupManagementApi.listBackups(orgId, appId, envId, backupType);
+      const listResponse = await client.backupManagementApi.listBackups(
+        orgId, 
+        appId, 
+        envId, 
+        backupType,
+        undefined, // order
+        undefined, // limit
+        undefined, // createdBefore
+        undefined, // createdAfter
+        undefined, // status
+        undefined, // nextToken
+      );
       const backups = listResponse.data?.backups || [];
       
       if (backups.length === 0) {

@@ -25,23 +25,11 @@ export class ApiClient {
   private token: string;
 
   constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string) {
-    // Set authentication headers
-    const defaultHeaders = {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      ...(defaultOrganizationId && { 'X-Organization': defaultOrganizationId }),
-      ...(defaultApplicationId && { 'X-Application': defaultApplicationId }),
-      ...(defaultEnvironmentId && { 'X-Environment': defaultEnvironmentId }),
-    };
-
-    // Configure the APIs with Configuration object
+    // Configure the APIs using Configuration object (v4.3.0)
+    // The client automatically handles Authorization header via accessToken
     const config = new Configuration({
       basePath: baseUrl,
-      accessToken: token,
-      baseOptions: {
-        headers: defaultHeaders
-      }
+      accessToken: token
     });
 
     this.applicationsApi = new ApplicationsApi(config);
@@ -178,7 +166,12 @@ export class ApiClient {
     }
 
     try {
-      const response = await this.environmentsApi.getEnvironmentMetrics(organizationId, applicationId, options.environmentId);
+      // getEnvironmentMetrics has many optional parameters before options
+      const response = await this.environmentsApi.getEnvironmentMetrics(
+        organizationId, 
+        applicationId, 
+        options.environmentId
+      );
       return response.data;
     } catch (error: any) {
       // Provide friendly error messages instead of debug dumps
@@ -253,7 +246,7 @@ export class ApiClient {
 
     try {
       const response = await this.crawlersApi.crawlersList(organizationId, projectName);
-      return response.data;
+      return response.data as any;
     } catch (error: any) {
       if (error.statusCode === 404 || error.response?.status === 404) {
         throw new Error(`Project '${projectName}' not found or has no crawlers.`);
