@@ -12,6 +12,19 @@ import { Application } from '../types/auth.js';
 
 const logger = new Logger('App');
 
+interface AppEnvironment {
+  envName: string;
+  status?: string;
+  runningCount?: number;
+  desiredCount?: number;
+  deploymentStatus?: string;
+}
+
+interface AppData {
+  appName: string;
+  environments?: AppEnvironment[];
+}
+
 export function appCommand(program: Command) {
   const app = program.command('app').description('Manage applications');
   
@@ -52,8 +65,8 @@ async function handleAppList(options: AppOptions) {
       org: options.org,
       platform: options.platform
     });
-    const apps = await client.getApplications({ organizationId: options.org });
-    
+    const apps: AppData[] = await client.getApplications({ organizationId: options.org });
+
     // Remove debug logging
     
     spinner.succeed(`Found ${apps.length} application${apps.length !== 1 ? 's' : ''}`);
@@ -67,12 +80,12 @@ async function handleAppList(options: AppOptions) {
     const auth = await getActivePlatformConfig();
     
     logger.info('\nApplications:');
-    apps.forEach((app: any, index) => {
+    apps.forEach((app) => {
       const isActive = app.appName === auth?.activeApplication;
       const marker = isActive ? chalk.green('*') : ' ';
-      
+
       // Check production environment status for overall app status
-      const prodEnv = app.environments?.find((env: any) => env.envName === 'production');
+      const prodEnv = app.environments?.find((env) => env.envName === 'production');
       const status = prodEnv ? getStatusIndicator(prodEnv.status) : '○';
       
       logger.info(`${marker} ${status} ${chalk.cyan(app.appName)}`);
@@ -81,7 +94,7 @@ async function handleAppList(options: AppOptions) {
       if (app.environments && app.environments.length > 0) {
         const maxEnvsToShow = 3;
         const envs = app.environments.slice(0, maxEnvsToShow);
-        const envNames = envs.map((e: any) => e.envName);
+        const envNames = envs.map((e) => e.envName);
         const remainingCount = app.environments.length - maxEnvsToShow;
         
         let envDisplay = envNames.join(', ');
@@ -91,7 +104,7 @@ async function handleAppList(options: AppOptions) {
         logger.info(`   ${chalk.gray('Environments:')} ${envDisplay}`);
         
         // Show running status for displayed environments only
-        envs.forEach((env: any) => {
+        envs.forEach((env) => {
           const envStatus = env.deploymentStatus === 'COMPLETED' ? chalk.green('✓') : chalk.yellow('⚠');
           const running = env.runningCount || 0;
           const desired = env.desiredCount || 0;
@@ -114,18 +127,19 @@ async function handleAppList(options: AppOptions) {
       logger.info(`${chalk.gray('Use')} ${chalk.cyan('quant-cloud app select')} ${chalk.gray('to change active application')}`);
     }
     
-  } catch (error: any) {
+  } catch (error) {
     spinner.fail('Failed to load applications');
-    
-    if (error.message?.includes('Not authenticated')) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (message.includes('Not authenticated')) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
-    } else if (error.message?.includes('404') || error.message?.includes('not found')) {
+    } else if (message.includes('404') || message.includes('not found')) {
       logger.error('Organization not found or no access to applications.');
       logger.info(`${chalk.gray('Use')} ${chalk.cyan('quant-cloud org list')} ${chalk.gray('to see available organizations')}`);
-    } else if (error.message?.includes('403') || error.message?.includes('forbidden')) {
+    } else if (message.includes('403') || message.includes('forbidden')) {
       logger.error('Access denied. You may not have permission to view applications in this organization.');
     } else {
-      logger.error('Error:', error.message);
+      logger.error('Error:', message);
       logger.debug('Full error:', error);
     }
   }
@@ -147,7 +161,7 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
       platform: options?.platform
     });
     
-    let apps: any[] = [];
+    let apps: AppData[] = [];
     try {
       apps = await client.getApplications({ organizationId: options?.org });
       spinner.succeed('Loaded applications');
@@ -155,22 +169,22 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
       spinner.fail('Failed to load applications');
       throw error;
     }
-    
+
     if (apps.length === 0) {
       logger.info('No applications available in this organization.');
       return;
     }
-    
+
     if (apps.length === 1) {
       logger.info('Only one application available - no switching needed.');
       return;
     }
-    
+
     let targetAppId = appId;
-    
+
     // If no appId provided, show interactive selection with search
     if (!targetAppId) {
-      const appChoices = apps.map((app: any) => {
+      const appChoices = apps.map((app) => {
         const isCurrent = app.appName === auth.activeApplication;
         return {
           name: `${app.appName}${isCurrent ? chalk.green(' - current') : ''}`,
@@ -183,14 +197,14 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
           type: 'autocomplete',
           name: 'selectedAppId',
           message: 'Select application (type to filter):',
-          source: async (answersSoFar: any, input: string) => {
+          source: async (_answersSoFar: unknown, input: string) => {
             if (!input) {
               return appChoices;
             }
-            
+
             // Filter applications based on user input
-            const filtered = appChoices.filter((choice: any) => 
-              choice.value.toLowerCase().includes(input.toLowerCase())
+            const filtered = appChoices.filter((choice) =>
+              choice.value?.toLowerCase().includes(input.toLowerCase())
             );
             
             return filtered.length > 0 ? filtered : [
@@ -212,11 +226,11 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
     }
     
     // Validate the application exists
-    const targetApp = apps.find((a: any) => a.appName === targetAppId);
+    const targetApp = apps.find((a) => a.appName === targetAppId);
     if (!targetApp) {
       logger.error(`Application '${targetAppId}' not found.`);
       logger.info('Available applications:');
-      apps.forEach((app: any) => {
+      apps.forEach((app) => {
         logger.info(`  ${chalk.cyan(app.appName)}`);
       });
       return;
@@ -254,13 +268,13 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
       }
       
       // Multiple environments - prompt for selection
-      const searchEnvs = (answers: any, input: string = '') => {
+      const searchEnvs = (_answers: unknown, input: string = '') => {
         return new Promise((resolve) => {
-          const filtered = environments.filter((env: any) => 
+          const filtered = environments.filter((env) =>
             env.envName.toLowerCase().includes(input.toLowerCase())
           );
-          
-          const choices = filtered.map((env: any) => ({
+
+          const choices = filtered.map((env) => ({
             name: `${chalk.magenta(env.envName)} ${chalk.gray(`(${env.runningCount || 0}/${env.desiredCount || 0} running)`)}`,
             value: env.envName
           }));
@@ -322,7 +336,7 @@ async function handleAppCurrent() {
       const spinner = createSpinner('Loading application data...');
       const client = await ApiClient.create();
       
-      let apps: any[] = [];
+      let apps: Application[] = [];
       try {
         apps = await client.getApplications();
         spinner.succeed('Loaded application data');
@@ -330,8 +344,8 @@ async function handleAppCurrent() {
         spinner.fail('Failed to load application data');
         throw error;
       }
-      
-      const activeApp = apps.find((a: Application) => a.machine_name === auth.activeApplication);
+
+      const activeApp = apps.find((a) => a.machine_name === auth.activeApplication);
       
       if (!activeApp) {
         logger.info('Active application not found in current organization.');
