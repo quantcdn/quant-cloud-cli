@@ -694,46 +694,13 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
       applicationId,
       environmentId
     );
-    
-    // SDK incorrectly types this as void, but it actually returns data
-    // Cast to any to work around the SDK type issue
-    const data = response.data as any;
-    
-    // The logs might be in different formats, let's handle various possibilities
-    if (data) {
-      // If body is already parsed JSON
-      if (Array.isArray(data)) {
-        return data;
-      }
-      
-      // If body has a logs property
-      if (data.logs && Array.isArray(data.logs)) {
-        return data.logs;
-      }
-      
-      // If body is a single log entry
-      if (data.message || data.timestamp) {
-        return [data];
-      }
-      
-      // Try to parse as JSON string if it's a string
-      if (typeof data === 'string') {
-        try {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            return parsed;
-          }
-          if (parsed.logs) {
-            return parsed.logs;
-          }
-          return [parsed];
-        } catch {
-          // If parsing fails, treat as plain text logs
-          return [{ message: data, timestamp: new Date().toISOString() }];
-        }
-      }
+
+    const data = response.data;
+
+    if (data && data.logEvents && Array.isArray(data.logEvents)) {
+      return data.logEvents;
     }
-    
+
     return [];
   } catch (error: any) {
     logger.error('API call failed:', error);
@@ -742,32 +709,14 @@ async function fetchLogs(client: ApiClient, organizationId: string, applicationI
 }
 
 function displayLog(log: any) {
-  const timestamp = log.timestamp || log.time || log.created_at || new Date().toISOString();
-  const message = log.message || log.msg || log.log || String(log);
-  const level = log.level || log.severity || 'info';
-  
-  // Format timestamp
+  const timestamp = log.timestamp || new Date().getTime();
+  const message = log.message || String(log);
+
+  // timestamp is Unix ms from CloudWatch
   const date = new Date(timestamp);
   const formattedTime = date.toLocaleTimeString();
-  
-  // Color code by log level
-  let levelColor = chalk.gray;
-  if (level.toLowerCase().includes('error') || level.toLowerCase().includes('err')) {
-    levelColor = chalk.red;
-  } else if (level.toLowerCase().includes('warn')) {
-    levelColor = chalk.yellow;
-  } else if (level.toLowerCase().includes('info')) {
-    levelColor = chalk.blue;
-  } else if (level.toLowerCase().includes('debug')) {
-    levelColor = chalk.gray;
-  }
-  
-  // Display formatted log entry
-  console.log(
-    chalk.gray(`[${formattedTime}]`) + ' ' + 
-    levelColor(`${level.toUpperCase()}`) + ' ' + 
-    message
-  );
+
+  console.log(chalk.gray(`[${formattedTime}]`) + ' ' + message);
 }
 
 async function handleEnvMetrics(envId?: string, options?: EnvMetricsOptions) {

@@ -2,8 +2,6 @@
 
 import { program } from 'commander';
 import chalk from 'chalk';
-import figlet from 'figlet';
-import gradient from 'gradient-string';
 import { loginCommand } from './commands/login.js';
 import { logoutCommand } from './commands/logout.js';
 import { whoamiCommand } from './commands/whoami.js';
@@ -29,20 +27,21 @@ const version = packageJson.version;
 // Display full banner with ASCII art
 function displayBanner() {
   console.clear();
-  const title = figlet.textSync('QUANT CLI', {
-    font: 'ANSI Shadow',
-    horizontalLayout: 'default',
-    verticalLayout: 'default'
-  });
-  
-  console.log(gradient(['#00ff88', '#0088ff', '#8800ff'])(title));
-  console.log(chalk.cyan('Quant Cloud Platform CLI\n'));
+  const title =
+"                                                  \n" +
+"                 _       _           _        _ _ \n" +
+" ___ _ _ ___ ___| |_ ___| |___ _ _ _| |   ___| |_|\n" +
+"| . | | | .'|   |  _|  _| | . | | | . |  |  _| | |\n" +
+"|_  |___|__,|_|_|_| |___|_|___|___|___|  |___|_|_|\n" +
+"  |_|                                             ";
+
+  console.log(chalk.cyan(title));
+  console.log();
 }
 
 // Display slim banner for subcommands
 function displaySlimBanner() {
-  const title = gradient(['#00ff88', '#0088ff', '#8800ff'])('█ QUANT CLI');
-  console.log(title);
+  console.log(chalk.cyan('quantcloud cli'));
 }
 
 async function displayContext() {

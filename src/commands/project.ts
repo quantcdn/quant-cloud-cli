@@ -133,7 +133,7 @@ async function handleProjectSelect(projectName?: string, options?: ProjectOption
     // If no project name provided, show interactive selection
     if (!targetProjectName) {
       if (projects.length === 1) {
-        targetProjectName = projects[0].machine_name || projects[0].name;
+        targetProjectName = projects[0].machine_name;
         logger.info(`Only one project available: ${chalk.cyan(targetProjectName)}`);
       } else {
         const { selectedProjectName } = await inquirer.prompt([
@@ -142,8 +142,8 @@ async function handleProjectSelect(projectName?: string, options?: ProjectOption
             name: 'selectedProjectName',
             message: 'Select project:',
             choices: projects.map((proj: any) => ({
-              name: `${chalk.cyan(proj.machine_name || proj.name)} ${proj.name && proj.name !== proj.machine_name ? chalk.gray(`(${proj.name})`) : ''} ${proj.domain ? `- ${chalk.blue(proj.domain)}` : ''}`,
-              value: proj.machine_name || proj.name
+              name: `${chalk.cyan(proj.machine_name)} ${proj.name && proj.name !== proj.machine_name ? chalk.gray(`(${proj.name})`) : ''} ${proj.domain ? `- ${chalk.blue(proj.domain)}` : ''}`,
+              value: proj.machine_name // Always use machine_name for API calls
             }))
           }
         ]);
@@ -151,23 +151,23 @@ async function handleProjectSelect(projectName?: string, options?: ProjectOption
       }
     }
     
-    // Validate the project exists
+    // Validate the project exists (match by machine_name only)
     const targetProject = projects.find((p: any) => 
-      p.machine_name === targetProjectName || p.name === targetProjectName
+      p.machine_name === targetProjectName
     );
     
     if (!targetProject) {
       logger.error(`Project '${targetProjectName}' not found.`);
       logger.info('Available projects:');
       projects.forEach((proj: any) => {
-        logger.info(`  ${chalk.cyan(proj.machine_name || proj.name)}`);
+        logger.info(`  ${chalk.cyan(proj.machine_name)}`);
       });
       return;
     }
     
-    // Save the selected project
+    // Save the selected project (always use machine_name)
     await saveActivePlatformConfig({
-      activeProject: targetProject.machine_name || targetProject.name
+      activeProject: targetProject.machine_name
     });
     
     const displayName = targetProject.name || targetProject.machine_name;
@@ -206,7 +206,7 @@ async function handleProjectCurrent() {
       spinner.succeed('Loaded project data');
       
       const activeProject = projects.find((p: any) => 
-        p.machine_name === auth.activeProject || p.name === auth.activeProject
+        p.machine_name === auth.activeProject
       );
       
       if (!activeProject) {
