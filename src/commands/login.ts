@@ -175,11 +175,15 @@ async function handleLogin(options: LoginOptions) {
     spinner.text = 'Loading organization data...';
     const userInfo = await getUserInfo(tokenData.access_token, service.host);
     
-    // Save authentication config
+    // Save authentication config.
+    // expires_in may be missing from the OAuth response (legacy non-expiring
+    // tokens) — only set expiresAt when the server returns a valid duration.
     const authConfig: AuthConfig = {
       token: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
-      expiresAt: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString(),
+      expiresAt: typeof tokenData.expires_in === "number"
+        ? new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString()
+        : undefined,
       email: userInfo.email,
       host: service.host,
       organizations: userInfo.organizations,
@@ -204,7 +208,11 @@ async function handleLogin(options: LoginOptions) {
     logger.info(`${chalk.green('Platform:')} ${chalk.cyan(service.name.split(' - ')[0])}`);
     logger.info(`${chalk.green('Logged in as:')} ${chalk.cyan(userInfo.name)} (${chalk.cyan(userInfo.email)})`);
     logger.info(`${chalk.green('Access token:')} ${chalk.gray(tokenData.access_token.substring(0, 20) + '...')}`);
-    logger.info(`${chalk.green('Expires in:')} ${chalk.cyan(Math.floor(tokenData.expires_in / 86400) + ' days')}`);
+    if (typeof tokenData.expires_in === "number") {
+      logger.info(`${chalk.green('Expires in:')} ${chalk.cyan(Math.floor(tokenData.expires_in / 86400) + ' days')}`);
+    } else {
+      logger.info(`${chalk.green('Expires in:')} ${chalk.cyan('never (long-lived token)')}`);
+    }
     
     if (userInfo.organizations?.length) {
       logger.info(`${chalk.green('Organizations:')} ${chalk.cyan(userInfo.organizations.length.toString())}`);

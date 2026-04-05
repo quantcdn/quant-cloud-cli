@@ -253,7 +253,7 @@ export class ApiClient {
 
     try {
       const response = await this.crawlersApi.crawlersList(organizationId, projectName);
-      return response.data;
+      return (response.data as any) || [];
     } catch (error: any) {
       if (error.statusCode === 404 || error.response?.status === 404) {
         throw new Error(`Project '${projectName}' not found or has no crawlers.`);

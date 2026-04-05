@@ -36,7 +36,7 @@ export interface Organization {
 export interface LoginResponse {
   access_token: string;
   refresh_token?: string;
-  expires_in: number;
+  expires_in?: number;
   token_type: string;
   user?: {
     id: string;
