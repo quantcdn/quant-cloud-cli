@@ -8,7 +8,7 @@ import { join } from 'path';
 import { createSpinner } from '../utils/spinner.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
-import { loadVRTConfig, VRTConfig } from '../utils/config.js';
+import { resolveVRTConfig, VRTConfig } from '../utils/config.js';
 
 const logger = new Logger('VRT');
 
@@ -21,6 +21,7 @@ interface VRTOptions {
   quantAuth?: string;
   remoteAuth?: string;
   outputDir?: string;
+  config?: string;
 }
 
 interface VRTResult {
@@ -52,6 +53,7 @@ export function vrtCommand(program: Command) {
     .option('--quant-auth <credentials>', 'basic auth for Quant URLs (user:pass)')
     .option('--remote-auth <credentials>', 'basic auth for remote URLs (user:pass)')
     .option('--output-dir <dir>', 'output directory for screenshots')
+    .option('--config <path>', 'path to a VRT config file (default: ~/.quant/vrt-config.json)')
     .action(async (options: VRTOptions) => {
       await handleVRT(options);
     });
@@ -61,9 +63,22 @@ export function vrtCommand(program: Command) {
 
 async function handleVRT(options: VRTOptions) {
   try {
-    // Load VRT configuration
-    const config = await loadVRTConfig();
+    // Load VRT configuration from the requested source
+    const { config, explicitPath } = await resolveVRTConfig(options.config);
+
+    // An explicit --config path that is missing/invalid is a hard error -
+    // never silently fall back to the default config.
+    if (explicitPath && !config) {
+      logger.error(`Could not read VRT config file: ${chalk.cyan(explicitPath)}`);
+      logger.info('Ensure the path exists and contains valid JSON.');
+      process.exit(1);
+    }
+
     if (!config || Object.keys(config.projects).length === 0) {
+      if (explicitPath) {
+        logger.error(`No VRT projects defined in ${chalk.cyan(explicitPath)}`);
+        process.exit(1);
+      }
       logger.error('No VRT projects configured.');
       logger.info(`Configure projects by creating ${chalk.cyan('~/.quant/vrt-config.json')}`);
       logger.info('Example format:');

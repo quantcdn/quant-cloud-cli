@@ -204,6 +204,7 @@ Run automated visual regression testing to compare Quant projects against remote
 - `qc vrt --output-dir=./screenshots` - Set screenshot output directory
 - `qc vrt --quant-auth=user:pass` - Basic auth for Quant URLs
 - `qc vrt --remote-auth=user:pass` - Basic auth for remote URLs
+- `qc vrt --config=./path/to/vrt-config.json` - Use a specific VRT config file instead of the default `~/.quant/vrt-config.json`
 
 **Configuration:** Create `~/.quant/vrt-config.json` with project mappings:
 
@@ -247,6 +248,11 @@ qc vrt --quant-auth=user:pass --remote-auth=user:pass
 
 # Run with custom limits
 qc vrt --max-pages=50 --max-depth=5 --output-dir=./my-screenshots
+
+# Run against a config generated elsewhere (e.g. from Pulumi) without
+# clobbering your personal ~/.quant/vrt-config.json
+pulumi stack output vrtConfig --json > ./vrt-config.json
+qc vrt --config=./vrt-config.json
 ```
 
 **Output:**
