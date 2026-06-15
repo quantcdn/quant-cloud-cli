@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { AuthConfig, MultiPlatformConfig, PlatformInfo } from '../types/auth.js';
 
 const CONFIG_DIR = join(homedir(), '.quant');
@@ -233,13 +233,47 @@ export async function loadAuthConfigCompat(): Promise<AuthConfig | null> {
 }
 
 // VRT configuration management
-export async function loadVRTConfig(): Promise<VRTConfig | null> {
+
+// Load a VRT config from an explicit file path. Returns null if the file
+// cannot be read or parsed (same null-on-failure semantics as loadVRTConfig).
+export async function loadVRTConfigFrom(filePath: string): Promise<VRTConfig | null> {
   try {
-    const data = await fs.readFile(VRT_CONFIG_FILE, 'utf-8');
+    const data = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(data);
   } catch {
     return null;
   }
+}
+
+export async function loadVRTConfig(): Promise<VRTConfig | null> {
+  return loadVRTConfigFrom(VRT_CONFIG_FILE);
+}
+
+export interface ResolvedVRTConfig {
+  config: VRTConfig | null;
+  /** Absolute path to an explicit --config file, when one was provided. */
+  explicitPath?: string;
+}
+
+/**
+ * Selects the VRT config source. When an explicit --config path is given it is
+ * resolved against the cwd and loaded from there; otherwise the default
+ * ~/.quant/vrt-config.json is used. The loaders are injectable for testing.
+ */
+export async function resolveVRTConfig(
+  configPath: string | undefined,
+  loaders: {
+    loadDefault: typeof loadVRTConfig;
+    loadFrom: typeof loadVRTConfigFrom;
+  } = { loadDefault: loadVRTConfig, loadFrom: loadVRTConfigFrom },
+  cwd: string = process.cwd()
+): Promise<ResolvedVRTConfig> {
+  if (configPath) {
+    const explicitPath = resolve(cwd, configPath);
+    const config = await loaders.loadFrom(explicitPath);
+    return { config, explicitPath };
+  }
+  return { config: await loaders.loadDefault() };
 }
 
 export async function saveVRTConfig(config: VRTConfig): Promise<void> {
