@@ -153,6 +153,37 @@ qc ssh --container=php --command="/bin/zsh" --interactive
 qc ssh --container=php --command="mysql -u root -p" --interactive
 ```
 
+### Remote Command Execution (exec)
+
+Unlike `qc ssh --command`, `qc exec` runs commands **server-side** — the run
+keeps going if your laptop sleeps or loses connection. The CLI only watches
+progress; close it any time and reattach later.
+
+- `qc exec run "<command>"` - Run a command and watch until it completes
+- `qc exec run "<command>" --container php` - Target a specific container (defaults to the first in the task definition)
+- `qc exec run "<command>" --detach` - Start a run and return immediately (prints run ID)
+- `qc exec run "<command>" --interval 30` - Poll every 30 seconds (default 15, min 5)
+- `qc exec status <runId>` - Show current status and output for a run
+- `qc exec status <runId> --watch` - Reattach and watch a run until it completes (reprints the run's accumulated output from the beginning, then streams new lines as they arrive)
+- `qc exec list` - List command runs for the environment
+
+```bash
+# Long-running task that survives laptop sleep
+qc exec run "drush cron"
+
+# Fire and forget, check back later (from any machine)
+qc exec run "./import.sh" --detach
+qc exec status <runId> --watch
+```
+
+Ctrl+C while watching only detaches the CLI — the run continues on the server.
+
+Runs execute in a one-off container and are capped at **1 hour**; a run that
+exceeds the cap finishes with status `TIMED_OUT`. Commands containing shell
+operators (`&&`, `;`, `|`, …) are automatically run through `/bin/sh -c` on
+the server — write them flat (`qc exec run "echo a && exit 1"`) rather than
+nesting your own `sh -c '...'` quoting.
+
 ### Backup Management
 
 All backup commands support both **database** and **filesystem** backup types via the `--type` flag (defaults to `database`).
