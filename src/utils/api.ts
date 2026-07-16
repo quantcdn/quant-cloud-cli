@@ -1,7 +1,7 @@
 import { getActivePlatformConfig } from './config.js';
 import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
 import { Logger } from './logger.js';
-import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, CrawlersApi, Configuration } from '@quantcdn/quant-client';
+import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, CrawlersApi, CommandsApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
 
@@ -18,6 +18,7 @@ export class ApiClient {
   public backupManagementApi: BackupManagementApi;
   private projectsApi: ProjectsApi;
   public crawlersApi: CrawlersApi;
+  public commandsApi: CommandsApi;
   public baseUrl: string;
   private defaultOrganizationId?: string;
   private defaultApplicationId?: string;
@@ -38,7 +39,8 @@ export class ApiClient {
     this.backupManagementApi = new BackupManagementApi(config);
     this.projectsApi = new ProjectsApi(config);
     this.crawlersApi = new CrawlersApi(config);
-    
+    this.commandsApi = new CommandsApi(config);
+
     this.baseUrl = baseUrl;
     this.token = token;
     this.defaultOrganizationId = defaultOrganizationId;

@@ -12,6 +12,9 @@ const mockProjectsList = jest.fn<(...args: any[]) => any>();
 const mockProjectsRead = jest.fn<(...args: any[]) => any>();
 const mockCrawlersList = jest.fn<(...args: any[]) => any>();
 const mockCrawlersRun = jest.fn<(...args: any[]) => any>();
+const mockCreateCommand = jest.fn<(...args: any[]) => any>();
+const mockGetCommand = jest.fn<(...args: any[]) => any>();
+const mockListCommands = jest.fn<(...args: any[]) => any>();
 
 // Mock the SDK module before importing
 jest.unstable_mockModule('@quantcdn/quant-client', () => ({
@@ -37,6 +40,11 @@ jest.unstable_mockModule('@quantcdn/quant-client', () => ({
   CrawlersApi: jest.fn().mockImplementation(() => ({
     crawlersList: mockCrawlersList,
     crawlersRun: mockCrawlersRun,
+  })),
+  CommandsApi: jest.fn().mockImplementation(() => ({
+    createCommand: mockCreateCommand,
+    getCommand: mockGetCommand,
+    listCommands: mockListCommands,
   })),
 }));
 
@@ -65,6 +73,11 @@ describe('ApiClient', () => {
       expect(client.sshAccessApi).toBeDefined();
       expect(client.backupManagementApi).toBeDefined();
       expect(client.crawlersApi).toBeDefined();
+    });
+
+    it('should expose commandsApi', () => {
+      const client = new ApiClient('https://api.quantcdn.io', 'test-token');
+      expect(client.commandsApi).toBeDefined();
     });
   });
 
