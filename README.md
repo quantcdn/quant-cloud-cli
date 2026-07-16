@@ -179,7 +179,10 @@ qc exec status <runId> --watch
 Ctrl+C while watching only detaches the CLI — the run continues on the server.
 
 Runs execute in a one-off container and are capped at **1 hour**; a run that
-exceeds the cap finishes with status `TIMED_OUT`.
+exceeds the cap finishes with status `TIMED_OUT`. Commands containing shell
+operators (`&&`, `;`, `|`, …) are automatically run through `/bin/sh -c` on
+the server — write them flat (`qc exec run "echo a && exit 1"`) rather than
+nesting your own `sh -c '...'` quoting.
 
 ### Backup Management
 
