@@ -1,5 +1,8 @@
 import type { Command as CommandRun } from '@quantcdn/quant-client';
 
+// SUCCEEDED / FAILED / TIMED_OUT / UNKNOWN are the platform's terminal
+// states (see portal CommandStatusDisplay::TERMINAL_STATES); the rest are
+// kept as a defensive superset.
 const TERMINAL_STATUSES = new Set([
   'complete',
   'completed',
@@ -10,6 +13,8 @@ const TERMINAL_STATUSES = new Set([
   'error',
   'stopped',
   'cancelled',
+  'timed_out',
+  'unknown',
 ]);
 
 export function isTerminalRun(run: CommandRun): boolean {

@@ -177,6 +177,9 @@ qc exec status <runId> --watch
 
 Ctrl+C while watching only detaches the CLI — the run continues on the server.
 
+Runs execute in a one-off container and are capped at **1 hour**; a run that
+exceeds the cap finishes with status `TIMED_OUT`.
+
 ### Backup Management
 
 All backup commands support both **database** and **filesystem** backup types via the `--type` flag (defaults to `database`).

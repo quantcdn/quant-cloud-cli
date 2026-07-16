@@ -17,6 +17,15 @@ describe('isTerminalRun', () => {
     expect(isTerminalRun({ status: 'Stopped' })).toBe(true);
   });
 
+  it('is terminal for the platform terminal states', () => {
+    expect(isTerminalRun({ status: 'SUCCEEDED' })).toBe(true);
+    expect(isTerminalRun({ status: 'FAILED' })).toBe(true);
+    expect(isTerminalRun({ status: 'TIMED_OUT' })).toBe(true);
+    expect(isTerminalRun({ status: 'UNKNOWN' })).toBe(true);
+    expect(isTerminalRun({ status: 'PENDING' })).toBe(false);
+    expect(isTerminalRun({ status: 'RUNNING' })).toBe(false);
+  });
+
   it('is not terminal while running', () => {
     expect(isTerminalRun({ status: 'RUNNING', startTime: '2026-07-16T00:00:00Z' })).toBe(false);
     expect(isTerminalRun({})).toBe(false);
