@@ -10,6 +10,7 @@ import { appCommand } from './commands/app.js';
 import { projectCommand } from './commands/project.js';
 import { envCommand } from './commands/env.js';
 import { sshCommand } from './commands/ssh.js';
+import { execCommand } from './commands/exec.js';
 import { platformCommand } from './commands/platform.js';
 import { backupCommand } from './commands/backup.js';
 import { vrtCommand } from './commands/vrt.js';
@@ -119,6 +120,7 @@ async function main() {
       envCommand(program);
       platformCommand(program);
       program.addCommand(sshCommand);
+      program.addCommand(execCommand);
       program.addCommand(backupCommand(program));
       vrtCommand(program);
       crawlerCommand(program);
