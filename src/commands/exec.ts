@@ -16,6 +16,7 @@ interface ExecContextOptions {
 interface ExecRunOptions extends ExecContextOptions {
   detach?: boolean;
   interval?: string;
+  container?: string;
 }
 
 interface ExecStatusOptions extends ExecContextOptions {
@@ -34,7 +35,7 @@ function resolveIntervalMs(interval?: string): number {
 
 async function resolveExecContext(
   options: ExecContextOptions
-): Promise<{ client: ApiClient; orgId: string; envId: string } | null> {
+): Promise<{ client: ApiClient; orgId: string; appId: string; envId: string } | null> {
   const auth = await getActivePlatformConfig();
   if (!auth || !auth.token) {
     console.log(chalk.red('Not authenticated. Run `quant-cloud login` to authenticate.'));
@@ -50,10 +51,16 @@ async function resolveExecContext(
   });
 
   const orgId = options.org || client['defaultOrganizationId'];
+  const appId = options.app || client['defaultApplicationId'];
   const envId = options.env || client['defaultEnvironmentId'];
 
   if (!orgId) {
     console.log(chalk.red('No organization specified. Use --org or set active organization.'));
+    process.exitCode = 1;
+    return null;
+  }
+  if (!appId) {
+    console.log(chalk.red('No application specified. Use --app or set active application.'));
     process.exitCode = 1;
     return null;
   }
@@ -63,7 +70,7 @@ async function resolveExecContext(
     return null;
   }
 
-  return { client, orgId, envId };
+  return { client, orgId, appId, envId };
 }
 
 function formatElapsed(ms: number): string {
@@ -90,6 +97,7 @@ function printRunSummary(run: CommandRun): void {
 async function watchRun(
   client: ApiClient,
   orgId: string,
+  appId: string,
   envId: string,
   runId: string,
   intervalMs: number
@@ -108,7 +116,7 @@ async function watchRun(
 
   try {
     const finalRun = await pollCommandRun(
-      async () => (await client.commandsApi.getCommand(orgId, envId, runId)).data,
+      async () => (await client.commandsApi.getCommand(orgId, appId, envId, runId)).data,
       {
         intervalMs,
         onOutputLines: (lines) => {
@@ -150,12 +158,17 @@ async function watchRun(
 async function handleRun(cmd: string, options: ExecRunOptions): Promise<void> {
   const context = await resolveExecContext(options);
   if (!context) return;
-  const { client, orgId, envId } = context;
+  const { client, orgId, appId, envId } = context;
 
   const spinner = createSpinner('Creating command run...');
   let runId: string | undefined;
   try {
-    const created = (await client.commandsApi.createCommand(orgId, envId, { command: cmd })).data;
+    const created = (
+      await client.commandsApi.createCommand(orgId, appId, envId, {
+        command: cmd,
+        ...(options.container ? { containerName: options.container } : {}),
+      })
+    ).data;
     runId = created.runId;
   } catch (error: any) {
     spinner.fail(`Failed to create command run: ${error.message || String(error)}`);
@@ -179,22 +192,22 @@ async function handleRun(cmd: string, options: ExecRunOptions): Promise<void> {
     return;
   }
 
-  await watchRun(client, orgId, envId, runId, resolveIntervalMs(options.interval));
+  await watchRun(client, orgId, appId, envId, runId, resolveIntervalMs(options.interval));
 }
 
 async function handleStatus(runId: string, options: ExecStatusOptions): Promise<void> {
   const context = await resolveExecContext(options);
   if (!context) return;
-  const { client, orgId, envId } = context;
+  const { client, orgId, appId, envId } = context;
 
   if (options.watch) {
-    await watchRun(client, orgId, envId, runId, resolveIntervalMs(options.interval));
+    await watchRun(client, orgId, appId, envId, runId, resolveIntervalMs(options.interval));
     return;
   }
 
   const spinner = createSpinner('Fetching run status...');
   try {
-    const run = (await client.commandsApi.getCommand(orgId, envId, runId)).data;
+    const run = (await client.commandsApi.getCommand(orgId, appId, envId, runId)).data;
     spinner.stop();
     printRunSummary(run);
     const output = run.output ?? [];
@@ -211,12 +224,16 @@ async function handleStatus(runId: string, options: ExecStatusOptions): Promise<
 async function handleList(options: ExecContextOptions): Promise<void> {
   const context = await resolveExecContext(options);
   if (!context) return;
-  const { client, orgId, envId } = context;
+  const { client, orgId, appId, envId } = context;
 
   const spinner = createSpinner('Fetching command runs...');
   try {
-    const response = await client.commandsApi.listCommands(orgId, envId);
-    const runs: CommandRun[] = Array.isArray(response.data) ? response.data : [response.data];
+    const response = await client.commandsApi.listCommands(orgId, appId, envId);
+    // The API currently declares only a 501 response for this endpoint, so the
+    // generated return type is void; keep the display logic for when the
+    // platform grows a real list endpoint.
+    const data = response.data as unknown as CommandRun | CommandRun[] | null;
+    const runs: CommandRun[] = Array.isArray(data) ? data : data ? [data] : [];
     spinner.stop();
 
     if (runs.length === 0 || (runs.length === 1 && !runs[0]?.runId)) {
@@ -237,6 +254,11 @@ async function handleList(options: ExecContextOptions): Promise<void> {
       );
     }
   } catch (error: any) {
+    if (error.response?.status === 501) {
+      spinner.warn('Command history listing is not yet supported by the platform.');
+      console.log(chalk.gray('Track individual runs with: qc exec status <runId>'));
+      return;
+    }
     spinner.fail(`Failed to list runs: ${error.message || String(error)}`);
     process.exitCode = 1;
   }
@@ -258,6 +280,7 @@ withContextOptions(
   execCommand
     .command('run <cmd>')
     .description('Run a command server-side and watch it until it completes')
+    .option('--container <name>', 'target container (defaults to the first container in the task definition)')
     .option('--detach', 'start the run and return immediately')
     .option('--interval <sec>', `poll interval in seconds (default ${DEFAULT_INTERVAL_SEC}, min ${MIN_INTERVAL_SEC})`)
 ).action(handleRun);
