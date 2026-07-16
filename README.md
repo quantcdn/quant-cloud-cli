@@ -163,7 +163,7 @@ progress; close it any time and reattach later.
 - `qc exec run "<command>" --detach` - Start a run and return immediately (prints run ID)
 - `qc exec run "<command>" --interval 30` - Poll every 30 seconds (default 15, min 5)
 - `qc exec status <runId>` - Show current status and output for a run
-- `qc exec status <runId> --watch` - Reattach and watch a run until it completes
+- `qc exec status <runId> --watch` - Reattach and watch a run until it completes (reprints the run's accumulated output from the beginning, then streams new lines as they arrive)
 - `qc exec list` - List command runs for the environment
 
 ```bash

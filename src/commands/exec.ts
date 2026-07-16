@@ -49,8 +49,8 @@ async function resolveExecContext(
     platform: options.platform,
   });
 
-  const orgId = options.org || auth.activeOrganization;
-  const envId = options.env || auth.activeEnvironment;
+  const orgId = options.org || client['defaultOrganizationId'];
+  const envId = options.env || client['defaultEnvironmentId'];
 
   if (!orgId) {
     console.log(chalk.red('No organization specified. Use --org or set active organization.'));
@@ -227,13 +227,13 @@ async function handleList(options: ExecContextOptions): Promise<void> {
     const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
     console.log(
       chalk.bold(
-        `${'RUN ID'.padEnd(38)} ${'STATUS'.padEnd(12)} ${'STARTED'.padEnd(22)} COMMAND`
+        `${'RUN ID'.padEnd(38)} ${'STATUS'.padEnd(12)} ${'TYPE'.padEnd(10)} ${'STARTED'.padEnd(22)} COMMAND`
       )
     );
     for (const run of runs) {
       const started = run.startTime ? new Date(run.startTime).toLocaleString() : '-';
       console.log(
-        `${(run.runId || '-').padEnd(38)} ${(run.status || '-').padEnd(12)} ${started.padEnd(22)} ${truncate(run.command || '-', 40)}`
+        `${(run.runId || '-').padEnd(38)} ${(run.status || '-').padEnd(12)} ${(run.runType || '-').padEnd(10)} ${started.padEnd(22)} ${truncate(run.command || '-', 40)}`
       );
     }
   } catch (error: any) {

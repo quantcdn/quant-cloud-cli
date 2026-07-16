@@ -101,6 +101,18 @@ describe('pollCommandRun', () => {
     expect(result).toEqual({ exitCode: 0 });
   });
 
+  it('defaults to aborting after 5 consecutive failures', async () => {
+    let attempts = 0;
+    const fetchRun = async () => {
+      attempts++;
+      throw new Error('down');
+    };
+    await expect(pollCommandRun(fetchRun, { intervalMs: 1 })).rejects.toThrow(
+      'Polling aborted after 5 consecutive failures'
+    );
+    expect(attempts).toBe(5);
+  });
+
   it('resolves null promptly when cancelled, even with a long interval', async () => {
     let polls = 0;
     const fetchRun = async () => {
