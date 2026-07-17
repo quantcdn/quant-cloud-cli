@@ -27,9 +27,31 @@ export function isTerminalRun(run: CommandRun): boolean {
 export interface PollOptions {
   intervalMs: number;
   maxConsecutiveFailures?: number;
+  fetchTimeoutMs?: number;
   onOutputLines?: (lines: string[]) => void;
   onPollError?: (error: Error, consecutiveFailures: number) => void;
   isCancelled?: () => boolean;
+}
+
+// Requests have no transport-level timeout by default (axios waits forever),
+// so a socket that dies without an RST — e.g. after laptop suspend/resume —
+// would hang the poll loop indefinitely. Racing each fetch against a deadline
+// turns a hung request into an ordinary poll failure that retries on a fresh
+// connection next interval.
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Poll request timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Sleep in short chunks so Ctrl+C (cancellation) is noticed quickly
@@ -49,6 +71,7 @@ export async function pollCommandRun(
   options: PollOptions
 ): Promise<CommandRun | null> {
   const maxFailures = options.maxConsecutiveFailures ?? 5;
+  const fetchTimeoutMs = options.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
   const isCancelled = options.isCancelled ?? (() => false);
   let printedLines = 0;
   let consecutiveFailures = 0;
@@ -58,7 +81,7 @@ export async function pollCommandRun(
 
     let run: CommandRun | undefined;
     try {
-      run = await fetchRun();
+      run = await fetchWithTimeout(fetchRun(), fetchTimeoutMs);
       consecutiveFailures = 0;
     } catch (error: any) {
       consecutiveFailures++;

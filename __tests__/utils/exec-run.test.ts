@@ -122,6 +122,38 @@ describe('pollCommandRun', () => {
     expect(attempts).toBe(5);
   });
 
+  it('treats a fetch that hangs longer than fetchTimeoutMs as a failure', async () => {
+    const onPollError = jest.fn();
+    const fetchRun = () => new Promise<never>(() => {});
+    await expect(
+      pollCommandRun(fetchRun, {
+        intervalMs: 1,
+        fetchTimeoutMs: 25,
+        maxConsecutiveFailures: 2,
+        onPollError,
+      })
+    ).rejects.toThrow('Polling aborted after 2 consecutive failures');
+    expect(onPollError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('timed out') }),
+      expect.any(Number)
+    );
+  });
+
+  it('recovers when a fetch succeeds after a hung one', async () => {
+    let calls = 0;
+    const fetchRun = () => {
+      calls++;
+      if (calls === 1) return new Promise<never>(() => {});
+      return Promise.resolve({ exitCode: 0 });
+    };
+    const result = await pollCommandRun(fetchRun, {
+      intervalMs: 1,
+      fetchTimeoutMs: 25,
+    });
+    expect(result).toEqual({ exitCode: 0 });
+    expect(calls).toBe(2);
+  });
+
   it('resolves null promptly when cancelled, even with a long interval', async () => {
     let polls = 0;
     const fetchRun = async () => {
