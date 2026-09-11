@@ -1,10 +1,10 @@
 import { Command } from 'commander';
-import { spawn } from 'child_process';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { getActivePlatformConfig } from '../utils/config.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
+import { describeAwsCliSpawnError, spawnAwsCli } from '../utils/aws-cli.js';
 import { SSHAccessApi, GetSshAccessCredentials200Response } from '@quantcdn/quant-client';
 
 interface SSHOptions {
@@ -49,9 +49,9 @@ async function handleSSH(options: SSHOptions) {
 
     // Check if AWS CLI is installed
     spinner.text = 'Checking AWS CLI installation...';
-    const awsCliAvailable = await checkAWSCLI();
-    if (!awsCliAvailable) {
-      spinner.fail('AWS CLI is required but not installed. Please install it first: https://aws.amazon.com/cli/');
+    const awsCliProblem = await checkAWSCLI();
+    if (awsCliProblem) {
+      spinner.fail(awsCliProblem);
       return;
     }
 
@@ -158,14 +158,23 @@ async function handleSSH(options: SSHOptions) {
   }
 }
 
-async function checkAWSCLI(): Promise<boolean> {
+/**
+ * Resolves to null when the aws CLI runs, otherwise to a message explaining why it does not.
+ */
+async function checkAWSCLI(): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn('aws', ['--version'], { stdio: 'pipe' });
+    let child;
+    try {
+      child = spawnAwsCli(['--version'], { stdio: 'pipe' });
+    } catch (error) {
+      resolve((error as Error).message);
+      return;
+    }
     child.on('close', (code) => {
-      resolve(code === 0);
+      resolve(code === 0 ? null : `AWS CLI exited with code ${code} when checking its version.`);
     });
-    child.on('error', () => {
-      resolve(false);
+    child.on('error', (error) => {
+      resolve(describeAwsCliSpawnError(error));
     });
   });
 }
@@ -224,7 +233,9 @@ async function executeAWSCommand(
     process.on('SIGINT', sigintHandler);
 
     // AWS CLI new process
-    const child = spawn('aws', args, {
+    // spawnAwsCli throws a descriptive Error on a synchronous spawn failure;
+    // a throw inside a Promise executor rejects the promise with that Error.
+    const child = spawnAwsCli(args, {
       env,
       stdio: 'inherit',
       shell: false,
@@ -245,7 +256,7 @@ async function executeAWSCommand(
 
     child.on('error', (error) => {
       process.removeListener('SIGINT', sigintHandler);
-      reject(new Error(`Failed to execute AWS CLI: ${error.message}`));
+      reject(new Error(describeAwsCliSpawnError(error)));
     });
   });
 }
