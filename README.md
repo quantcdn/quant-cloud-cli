@@ -130,12 +130,12 @@ qc env list                     # Still finds .quant.yml at project root
 - `qc env metrics [envId]` - Live metrics dashboard with real-time updates
 
 ### Environment Variables
-- `qc env vars list` - List variables of the environment (names and values, `--json` for JSON)
+- `qc env vars list` - List variables of the environment. Values are masked unless `--show-values`; `--json` for JSON
 - `qc env vars get <KEY>` - Print the raw value of one variable (script-friendly)
 - `qc env vars set <KEY> <VALUE>` - Set one variable
 - `qc env vars set <KEY> --stdin` - Set one variable, reading the value from stdin (keeps it out of argv and shell history)
-- `qc env vars set --file .env` - Set every variable in a `.env` file; variables not in the file are kept
-- `qc env vars unset <KEY>` - Remove a variable
+- `qc env vars set --file .env` - Set every variable in a `.env` file; variables not in the file are kept. A line that is not `KEY=VALUE`, an invalid name or a duplicate key refuses the whole file
+- `qc env vars unset <KEY>` - Remove a variable. Asks for confirmation on a terminal; `--yes` skips it
 
 All commands target the active environment, or `--org`, `--app`, `--env`, `--platform`.
 
@@ -147,7 +147,7 @@ qc env vars list --env staging
 DEBUG=$(qc env vars get APP_DEBUG --env staging)
 printf '%s' "$API_TOKEN" | qc env vars set API_TOKEN --stdin --env production
 qc env vars set --file .env.production --env production
-qc env vars unset LEGACY_FLAG --env production
+qc env vars unset LEGACY_FLAG --env production --yes
 qc env state redeploy --env production
 ```
 

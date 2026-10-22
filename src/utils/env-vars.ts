@@ -65,7 +65,61 @@ export function normaliseVariables(data: unknown): EnvVariable[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// KEY = VALUE with an optional `export`, the shapes dotenv accepts.
+const ENV_LINE = /^\s*(?:export\s+)?([^=]*?)\s*=(.*)$/;
+const QUOTES = ['"', "'", '`'];
+
+// The quote character a value opens and does not close on its own line.
+function openQuote(rawValue: string): string | null {
+  const value = rawValue.trim();
+  const quote = value[0];
+  if (!QUOTES.includes(quote)) return null;
+  return value.indexOf(quote, 1) === -1 ? quote : null;
+}
+
+function checkKey(name: string, line: number, seen: Map<string, number>): string[] {
+  const errors: string[] = [];
+  const nameError = validateVariableName(name);
+  if (nameError) errors.push(`Line ${line}: ${nameError}`);
+  const first = seen.get(name);
+  if (first !== undefined) errors.push(`Line ${line}: '${name}' is already set on line ${first}.`);
+  else seen.set(name, line);
+  return errors;
+}
+
+/**
+ * dotenv.parse() silently drops every line it cannot read (no `=`, a space
+ * or `/` in the key, ...) and lets a duplicate key win. Scan the lines
+ * first, so that a file with a dropped line is refused, not half applied.
+ */
+export function scanEnvFile(content: string): string[] {
+  const errors: string[] = [];
+  const seen = new Map<string, number>();
+  let quote: string | null = null;
+  let quoteLine = 0;
+  content.split(/\r?\n/).forEach((line, index) => {
+    if (quote) {
+      if (line.includes(quote)) quote = null;
+      return;
+    }
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) return;
+    const match = ENV_LINE.exec(line);
+    if (!match) {
+      errors.push(`Line ${index + 1}: not a KEY=VALUE line.`);
+      return;
+    }
+    errors.push(...checkKey(match[1], index + 1, seen));
+    quote = openQuote(match[2]);
+    quoteLine = index + 1;
+  });
+  if (quote) errors.push(`Line ${quoteLine}: the quoted value is never closed.`);
+  return errors;
+}
+
 export function parseEnvFile(content: string): { variables: EnvVariable[]; errors: string[] } {
+  const scanErrors = scanEnvFile(content);
+  if (scanErrors.length > 0) return { variables: [], errors: scanErrors };
   const parsed = dotenv.parse(content);
   const variables: EnvVariable[] = [];
   const errors: string[] = [];
@@ -127,7 +181,10 @@ async function resolveSingleValue(input: SetCommandInput, deps: SetInputDeps): P
   if (input.stdin && input.value !== undefined) {
     return { errors: ['Give VALUE or --stdin, not both.'] };
   }
-  if (input.stdin) return deps.readStdin();
+  if (input.stdin) {
+    const value = await deps.readStdin();
+    return value === '' ? { errors: ['No value received on stdin. Pipe the value in, for example `printf %s "$VALUE" | qc env vars set KEY --stdin`.'] } : value;
+  }
   if (input.value === undefined) {
     return { errors: ['Missing VALUE. To keep the value off the command line, use --stdin.'] };
   }
@@ -151,6 +208,24 @@ export async function resolveSetInput(
   const valueError = validateVariableValue(input.key, value);
   if (valueError) return { errors: [valueError] };
   return { variables: [{ name: input.key, value }] };
+}
+
+export const MASKED_VALUE = '********';
+
+// A fixed mask, so the output does not show the length of a value either.
+export function maskValue(_value: string): string {
+  return MASKED_VALUE;
+}
+
+// C0 and C1 control characters except tab (and newline when asked). A value
+// with an escape sequence can otherwise rewrite what the terminal shows.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARS = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g;
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARS_KEEP_NEWLINE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+export function sanitizeForTerminal(text: string, options: { keepNewlines?: boolean } = {}): string {
+  return text.replace(options.keepNewlines ? CONTROL_CHARS_KEEP_NEWLINE : CONTROL_CHARS, '');
 }
 
 export async function listVariables(api: VariablesClient, target: VariablesTarget): Promise<EnvVariable[]> {

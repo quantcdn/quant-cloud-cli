@@ -5,10 +5,13 @@ import { Configuration, VariablesApi } from '@quantcdn/quant-client';
 import {
   describeApiError,
   listVariables,
+  maskValue,
   normaliseVariables,
   parseEnvFile,
   readStreamValue,
   resolveSetInput,
+  sanitizeForTerminal,
+  scanEnvFile,
   setVariables,
   unsetVariable,
   validateVariableName,
@@ -114,6 +117,67 @@ describe('parseEnvFile', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/EMPTY/);
   });
+
+  it('refuses the whole file when a line has no KEY=', () => {
+    // dotenv drops DB_PASSWORD without a word; the run must not go ahead without it.
+    const { variables, errors } = parseEnvFile('DB_HOST=db\nDB_PASSWORD\nDB_USER=root\n');
+    expect(variables).toEqual([]);
+    expect(errors).toEqual([expect.stringMatching(/^Line 2: .*KEY=VALUE/)]);
+  });
+
+  it('keeps multi-line quoted values', () => {
+    const { variables, errors } = parseEnvFile('KEY="-----BEGIN-----\nabc\n-----END-----"\nNEXT=1\n');
+    expect(errors).toEqual([]);
+    expect(variables.map((v) => v.name)).toEqual(['KEY', 'NEXT']);
+    expect(variables[0].value).toContain('abc');
+  });
+});
+
+describe('scanEnvFile', () => {
+  it('accepts blank lines, comments and export', () => {
+    expect(scanEnvFile('\n# c\n  # indented\nexport A=1\nB = 2\n')).toEqual([]);
+  });
+
+  it('reports each line dotenv would drop, with its line number', () => {
+    expect(scanEnvFile('OK=1\nA/B=v\nMY KEY=v\nA:B=v\nA[0]=v\nNOEQUALS\n')).toEqual([
+      expect.stringMatching(/^Line 2: Invalid variable name 'A\/B'/),
+      expect.stringMatching(/^Line 3: Invalid variable name 'MY KEY'/),
+      expect.stringMatching(/^Line 4: Invalid variable name 'A:B'/),
+      expect.stringMatching(/^Line 5: Invalid variable name 'A\[0\]'/),
+      expect.stringMatching(/^Line 6: .*KEY=VALUE/),
+    ]);
+  });
+
+  it('reports a duplicate key with the line of the first one', () => {
+    expect(scanEnvFile('X=1\nY=2\nX=3\n')).toEqual([expect.stringMatching(/^Line 3: 'X' is already set on line 1/)]);
+  });
+
+  it('does not read lines inside a multi-line quoted value as keys', () => {
+    expect(scanEnvFile("A='one\nnot a key line\ntwo'\nB=1\n")).toEqual([]);
+  });
+
+  it('reports a quoted value that never closes', () => {
+    expect(scanEnvFile('A="open\nB=1\n')).toEqual([expect.stringMatching(/^Line 1: .*never closed/)]);
+  });
+});
+
+describe('maskValue', () => {
+  it('hides the value and its length', () => {
+    expect(maskValue('s3cret')).toBe('********');
+    expect(maskValue('x'.repeat(200))).toBe('********');
+  });
+});
+
+describe('sanitizeForTerminal', () => {
+  it('removes escape sequences and other control characters', () => {
+    expect(sanitizeForTerminal('ok\u001b[2J\u001b]0;title\u0007\rfake')).toBe('ok[2J]0;titlefake');
+    expect(sanitizeForTerminal('a\u009bb\u007fc')).toBe('abc');
+  });
+
+  it('keeps tabs, and keeps newlines only when asked', () => {
+    expect(sanitizeForTerminal('a\tb\nc')).toBe('a\tbc');
+    expect(sanitizeForTerminal('a\tb\nc', { keepNewlines: true })).toBe('a\tb\nc');
+  });
 });
 
 describe('readStreamValue', () => {
@@ -140,6 +204,7 @@ describe('resolveSetInput', () => {
         if (path === '.env') return 'A=1\nB=2\n';
         if (path === 'bad.env') return 'A=1\nEMPTY=\n';
         if (path === 'blank.env') return '# nothing\n';
+        if (path === 'dropped.env') return 'A=1\nB\nC=3\n';
         throw new Error('ENOENT: no such file');
       },
     };
@@ -177,12 +242,19 @@ describe('resolveSetInput', () => {
       { input: { file: 'missing.env' }, match: /Cannot read 'missing.env'.*ENOENT/ },
       { input: { file: 'bad.env' }, match: /EMPTY/ },
       { input: { file: 'blank.env' }, match: /No variables found/ },
+      { input: { file: 'dropped.env' }, match: /Line 2/ },
     ];
     for (const { input, match } of cases) {
       const result = await resolveSetInput(input, deps);
       expect(result.variables).toBeUndefined();
       expect(result.errors?.join('\n')).toMatch(match);
     }
+  });
+
+  it('says when nothing arrived on stdin', async () => {
+    deps.readStdin = async () => '';
+    const result = await resolveSetInput({ key: 'K', stdin: true }, deps);
+    expect(result.errors).toEqual([expect.stringMatching(/No value received on stdin/)]);
   });
 
   it('does not read stdin when the input is invalid before the value', async () => {

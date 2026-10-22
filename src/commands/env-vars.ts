@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 import { getActivePlatformConfig } from '../utils/config.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
@@ -10,7 +11,9 @@ import {
   VariablesTarget,
   describeApiError,
   listVariables,
+  maskValue,
   resolveSetInput,
+  sanitizeForTerminal,
   setVariables,
   unsetVariable,
   validateVariableName,
@@ -25,6 +28,11 @@ interface VarsContextOptions {
 
 interface VarsListOptions extends VarsContextOptions {
   json?: boolean;
+  showValues?: boolean;
+}
+
+interface VarsUnsetOptions extends VarsContextOptions {
+  yes?: boolean;
 }
 
 interface VarsSetOptions extends VarsContextOptions {
@@ -51,7 +59,7 @@ function missingContextMessage(orgId?: string, appId?: string): string {
 async function resolveVarsContext(options: VarsContextOptions): Promise<VarsContext | null> {
   const auth = await getActivePlatformConfig();
   if (!auth || !auth.token) {
-    fail('Not authenticated. Run `quant-cloud login` to authenticate.');
+    fail('Not authenticated. Run `qc login` to authenticate.');
     return null;
   }
 
@@ -85,13 +93,20 @@ function printRedeployHint(target: VariablesTarget): void {
   );
 }
 
-function printVariablesTable(variables: EnvVariable[], target: VariablesTarget): void {
+// Values are masked unless --show-values, so a list in a CI log does not
+// leak them. `get KEY` still prints one value on purpose.
+function visibleVariables(variables: EnvVariable[], showValues?: boolean): EnvVariable[] {
+  return showValues ? variables : variables.map((v) => ({ name: v.name, value: maskValue(v.value) }));
+}
+
+function printVariablesTable(variables: EnvVariable[], target: VariablesTarget, showValues?: boolean): void {
   const width = Math.max(4, ...variables.map((v) => v.name.length));
   console.log(chalk.bold(`${'NAME'.padEnd(width)}  VALUE`));
   for (const variable of variables) {
-    console.log(`${chalk.cyan(variable.name.padEnd(width))}  ${variable.value}`);
+    console.log(`${chalk.cyan(sanitizeForTerminal(variable.name).padEnd(width))}  ${sanitizeForTerminal(variable.value)}`);
   }
   console.log(chalk.gray(`\n${variables.length} variable(s) on ${targetLabel(target)}`));
+  if (!showValues) console.log(chalk.gray('Values are hidden. Use --show-values to print them.'));
 }
 
 async function handleList(options: VarsListOptions): Promise<void> {
@@ -102,7 +117,7 @@ async function handleList(options: VarsListOptions): Promise<void> {
   // No spinner with --json: the spinner writes to stdout and would corrupt the JSON.
   const spinner = options.json ? null : createSpinner('Fetching variables...');
   try {
-    const variables = await listVariables(client.variablesApi, target);
+    const variables = visibleVariables(await listVariables(client.variablesApi, target), options.showValues);
     spinner?.stop();
     if (options.json) {
       console.log(JSON.stringify(variables, null, 2));
@@ -112,7 +127,7 @@ async function handleList(options: VarsListOptions): Promise<void> {
       console.log(chalk.gray(`No variables set on ${targetLabel(target)}.`));
       return;
     }
-    printVariablesTable(variables, target);
+    printVariablesTable(variables, target, options.showValues);
   } catch (error) {
     spinner?.stop();
     fail(`Failed to list variables: ${describeApiError(error)}`);
@@ -131,8 +146,10 @@ async function handleGet(key: string, options: VarsContextOptions): Promise<void
     const variables = await listVariables(client.variablesApi, target);
     const match = variables.find((v) => v.name === key);
     if (!match) return fail(`Variable '${key}' is not set on ${targetLabel(target)}.`);
-    // Raw value only, so `$(qc env vars get KEY)` works in scripts.
-    process.stdout.write(`${match.value}\n`);
+    // Raw value only, so `$(qc env vars get KEY)` works in scripts. On a
+    // terminal, control characters are removed first.
+    const value = process.stdout.isTTY ? sanitizeForTerminal(match.value, { keepNewlines: true }) : match.value;
+    process.stdout.write(`${value}\n`);
   } catch (error) {
     fail(`Failed to get variable: ${describeApiError(error)}`);
   }
@@ -170,7 +187,21 @@ async function handleSet(key: string | undefined, value: string | undefined, opt
   reportSetResults(results, target);
 }
 
-async function handleUnset(key: string, options: VarsContextOptions): Promise<void> {
+// Asks only on a terminal. Scripts and CI (no TTY) and --yes go ahead.
+async function confirmUnset(key: string, target: VariablesTarget, options: VarsUnsetOptions): Promise<boolean> {
+  if (options.yes || !process.stdin.isTTY || !process.stdout.isTTY) return true;
+  const { confirmUnset: ok } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'confirmUnset',
+      message: `Remove ${key} from ${targetLabel(target)}?`,
+      default: false,
+    },
+  ]);
+  return ok;
+}
+
+async function handleUnset(key: string, options: VarsUnsetOptions): Promise<void> {
   const nameError = validateVariableName(key);
   if (nameError) return fail(nameError);
 
@@ -178,16 +209,21 @@ async function handleUnset(key: string, options: VarsContextOptions): Promise<vo
   if (!context) return;
   const { client, target } = context;
 
-  const spinner = createSpinner(`Removing ${key} from ${targetLabel(target)}...`);
+  const spinner = createSpinner(`Checking ${key} on ${targetLabel(target)}...`);
   try {
     // DELETE is idempotent upstream (204 for a missing key), so check first
     // to tell the user when nothing changed.
     const variables = await listVariables(client.variablesApi, target);
+    spinner.stop();
     if (!variables.some((v) => v.name === key)) {
-      spinner.stop();
       console.log(chalk.yellow(`Variable '${key}' is not set on ${targetLabel(target)}. Nothing changed.`));
       return;
     }
+    if (!(await confirmUnset(key, target, options))) {
+      console.log(chalk.gray('Cancelled. Nothing changed.'));
+      return;
+    }
+    spinner.start(`Removing ${key} from ${targetLabel(target)}...`);
     await unsetVariable(client.variablesApi, target, key);
     spinner.succeed(`Removed ${chalk.cyan(key)} from ${targetLabel(target)}`);
     printRedeployHint(target);
@@ -215,8 +251,9 @@ export function envVarsCommand(env: Command): void {
   withContextOptions(
     vars
       .command('list')
-      .description('List variables of an environment (names and values)')
+      .description('List variables of an environment (values are hidden unless --show-values)')
       .option('--json', 'Output as JSON')
+      .option('--show-values', 'print the values, not a mask')
   ).action(handleList);
 
   withContextOptions(
@@ -247,6 +284,7 @@ ${WRITE_HELP}`
       .command('unset')
       .description('Remove a variable')
       .argument('<key>', 'variable name')
+      .option('-y, --yes', 'do not ask for confirmation')
       .addHelpText('after', WRITE_HELP)
   ).action(handleUnset);
 }
