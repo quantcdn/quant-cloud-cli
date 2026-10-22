@@ -1,8 +1,11 @@
 import chalk from 'chalk';
 
-// Custom spinner that plays nicely with inquirer
+// Custom spinner that plays nicely with inquirer. When stdout is not a
+// terminal (a pipe, a log file, CI) it draws nothing and only prints the
+// final succeed/fail/warn message.
 export class CustomSpinner {
   private intervalId?: NodeJS.Timeout;
+  private interactive = false;
   private _text: string = '';
   private frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   private frameIndex = 0;
@@ -18,10 +21,14 @@ export class CustomSpinner {
   start(message: string = 'Loading...') {
     this._text = message;
     this.frameIndex = 0;
+    this.interactive = Boolean(process.stdout.isTTY);
+    if (!this.interactive) {
+      return this;
+    }
     process.stdout.write(`${this.frames[this.frameIndex]} ${this._text}`);
     
     this.intervalId = setInterval(() => {
-      process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
+      this.clearLine();
       this.frameIndex = (this.frameIndex + 1) % this.frames.length;
       process.stdout.write(`${this.frames[this.frameIndex]} ${this._text}`);
     }, 80);
@@ -31,7 +38,6 @@ export class CustomSpinner {
 
   succeed(message?: string) {
     this.stop();
-    process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
     if (message) {
       console.log(chalk.green('✔') + ` ${message}`);
     }
@@ -39,7 +45,6 @@ export class CustomSpinner {
 
   fail(message?: string) {
     this.stop();
-    process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
     if (message) {
       console.log(chalk.red('✖') + ` ${message}`);
     }
@@ -47,7 +52,6 @@ export class CustomSpinner {
 
   warn(message?: string) {
     this.stop();
-    process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
     if (message) {
       console.log(chalk.yellow('⚠') + ` ${message}`);
     }
@@ -58,7 +62,13 @@ export class CustomSpinner {
       clearInterval(this.intervalId);
       this.intervalId = undefined;
     }
-    process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
+    this.clearLine();
+  }
+
+  private clearLine() {
+    if (this.interactive) {
+      process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
+    }
   }
 }
 
