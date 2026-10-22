@@ -9,6 +9,7 @@ import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
 import { Environment } from '../types/auth.js';
+import { envVarsCommand } from './env-vars.js';
 
 // Register the autocomplete prompt
 inquirer.registerPrompt('autocomplete', autocomplete);
@@ -118,6 +119,8 @@ export function envCommand(program: Command) {
     .action(async (envId, options) => {
       await handleEnvState('redeploy', envId, options);
     });
+
+  envVarsCommand(env);
 }
 
 interface EnvOptions {

@@ -46,6 +46,7 @@ jest.unstable_mockModule('@quantcdn/quant-client', () => ({
     getCommand: mockGetCommand,
     listCommands: mockListCommands,
   })),
+  VariablesApi: jest.fn().mockImplementation(() => ({})),
 }));
 
 let ApiClient: typeof ApiClientType;
