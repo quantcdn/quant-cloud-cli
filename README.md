@@ -35,6 +35,8 @@ npx @quantcdn/quant-cloud-cli
    qc login
    ```
    Select your platform (QuantGov Cloud or Quant Cloud), authenticate via browser.
+   For a custom endpoint, run `qc login --endpoint <url>`. The CLI saves it as the platform `custom`.
+   To change platform later, run `qc platform switch`.
 
 2. **Check authentication status:**
    ```bash
@@ -61,7 +63,6 @@ For project-specific workflows, create a `.quant.yml` file at your project root:
 
 ```yaml
 # .quant.yml - Project configuration
-platform: quantcdn      # or quantgov
 org: my-organization
 app: my-application
 env: development        # default environment
@@ -72,7 +73,7 @@ The CLI automatically detects this file when run from anywhere in your project d
 ### Context Priority
 
 The CLI resolves context in this priority order:
-1. **CLI flags** (highest) - `--org`, `--app`, `--env`, `--platform`
+1. **CLI flags** (highest) - `--org`, `--app`, `--env`
 2. **Project config** (`.quant.yml`)
 3. **Stored config** (lowest) - from `qc org select`, `qc app select`, etc.
 
@@ -102,6 +103,7 @@ qc env list                     # Still finds .quant.yml at project root
 - `qc whoami` - Display current user and authentication status
 
 ### Platform Management
+The active platform comes from `qc login` and `qc platform switch`. Use these commands to select it.
 - `qc platform list` - List all authenticated platforms
 - `qc platform switch` - Switch between authenticated platforms
 - `qc platform current` - Show currently active platform
@@ -163,7 +165,7 @@ has no secrets endpoint. Manage secrets in the dashboard.
 - `qc ssh --command="shell_or_command"` - Run specific shell or one-shot command (non-interactive by default)
 - `qc ssh --command="command" --interactive` - Run command in interactive mode
 
-**Context Overrides:** All SSH commands support `--org`, `--app`, `--env`, `--platform` flags
+**Context Overrides:** All SSH commands support `--org`, `--app`, `--env` flags
 
 **Examples:**
 ```bash
@@ -224,7 +226,7 @@ All backup commands support both **database** and **filesystem** backup types vi
   - Direct mode: `qc backup download <backupId>` to download specific backup
 - `qc backup delete [--type=database|filesystem]` - Delete backups with confirmation prompt
 
-**Context Overrides:** All backup commands support `--org`, `--app`, `--env`, `--platform` flags
+**Context Overrides:** All backup commands support `--org`, `--app`, `--env` flags
 
 **Examples:**
 ```bash
@@ -330,8 +332,14 @@ All commands support context override flags for automation and CI/CD:
 qc env logs --org=my-org --app=my-app --env=production --follow
 qc ssh --org=my-org --app=my-app --env=staging --container=web
 qc backup create --org=my-org --app=my-app --env=production --type=database
-qc env metrics --platform=quantgov --org=gov-dept --app=portal --env=prod
+qc env metrics --org=gov-dept --app=portal --env=prod
 ```
+
+## Known issue: `--platform` has no effect
+
+The CLI accepts a `--platform` option on commands and a `platform:` key in `.quant.yml`.
+Neither selects the platform today. The CLI always uses the active platform.
+Run `qc platform list`, `qc platform current` and `qc platform switch` to choose it.
 
 ## Configuration
 
@@ -348,7 +356,6 @@ Create a `.quant.yml` file at your project root for automatic context detection:
 
 ```yaml
 # .quant.yml
-platform: quantcdn    # Platform: quantcdn or quantgov
 org: my-org           # Organization machine name
 app: my-application   # Application machine name  
 env: development      # Default environment name
@@ -357,7 +364,7 @@ env: development      # Default environment name
 **Directory Traversal:** The CLI searches for `.quant.yml` starting from the current directory and walking up to the git repository root.
 
 **Context Resolution Priority:**
-1. CLI flags (`--org`, `--app`, `--env`, `--platform`)
+1. CLI flags (`--org`, `--app`, `--env`)
 2. Project config (`.quant.yml`)
 3. Stored user config (`~/.quant/credentials`)
 
