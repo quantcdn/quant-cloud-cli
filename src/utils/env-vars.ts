@@ -65,62 +65,113 @@ export function normaliseVariables(data: unknown): EnvVariable[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// KEY = VALUE with an optional `export`, the shapes dotenv accepts.
-const ENV_LINE = /^\s*(?:export\s+)?([^=]*?)\s*=(.*)$/;
+// dotenv 16's own line pattern (node_modules/dotenv/lib/main.js, LINE).
+// The scan walks the file with it, so it sees exactly the keys and line
+// spans dotenv sees. parseEnvFile() also cross-checks the keys, in case a
+// later dotenv reads files differently.
+const DOTENV_LINE =
+  /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gm;
+const EQUALS_FORM = /^\s*(?:export\s+)?[\w.-]+\s*=/;
 const QUOTES = ['"', "'", '`'];
 
-// The quote character a value opens and does not close on its own line.
-function openQuote(rawValue: string): string | null {
-  const value = rawValue.trim();
-  const quote = value[0];
-  if (!QUOTES.includes(quote)) return null;
-  return value.indexOf(quote, 1) === -1 ? quote : null;
+interface EnvLine {
+  name: string;
+  value: string;
+  line: number;
+  equalsForm: boolean;
 }
 
-function checkKey(name: string, line: number, seen: Map<string, number>): string[] {
-  const errors: string[] = [];
-  const nameError = validateVariableName(name);
-  if (nameError) errors.push(`Line ${line}: ${nameError}`);
-  const first = seen.get(name);
-  if (first !== undefined) errors.push(`Line ${line}: '${name}' is already set on line ${first}.`);
-  else seen.set(name, line);
-  return errors;
+interface ScanState {
+  errors: string[];
+  seen: Map<string, number>;
+  covered: Set<number>;
+}
+
+function lineAt(text: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i++) if (text[i] === '\n') line++;
+  return line;
+}
+
+// The dotenv entries of a file, with the line each key is on. Also marks
+// every line an entry spans, so lines dotenv skips can be found.
+function readEnvLines(text: string, covered: Set<number>): EnvLine[] {
+  const entries: EnvLine[] = [];
+  for (const match of text.matchAll(DOTENV_LINE)) {
+    const index = match.index ?? 0;
+    const body = match[0];
+    const keyOffset = index + body.search(/\S/);
+    const first = lineAt(text, keyOffset);
+    const last = lineAt(text, index + body.length);
+    for (let line = first; line <= last; line++) covered.add(line);
+    entries.push({ name: match[1], value: (match[2] ?? '').trim(), line: first, equalsForm: EQUALS_FORM.test(body) });
+  }
+  return entries;
+}
+
+function isUnclosedQuote(value: string): boolean {
+  const quote = value[0];
+  return QUOTES.includes(quote) && (value.length < 2 || !value.endsWith(quote));
+}
+
+function checkEntry(entry: EnvLine, state: ScanState): void {
+  const at = `Line ${entry.line}:`;
+  if (!entry.equalsForm) {
+    state.errors.push(`${at} the 'KEY: VALUE' form is not supported; use KEY=VALUE.`);
+    return;
+  }
+  const nameError = validateVariableName(entry.name);
+  if (nameError) state.errors.push(`${at} ${nameError}`);
+  if (isUnclosedQuote(entry.value)) state.errors.push(`${at} the quoted value of '${entry.name}' is never closed.`);
+  const first = state.seen.get(entry.name);
+  if (first !== undefined) state.errors.push(`${at} '${entry.name}' is already set on line ${first}.`);
+  else state.seen.set(entry.name, entry.line);
+}
+
+function checkSkippedLines(lines: string[], state: ScanState): void {
+  lines.forEach((text, index) => {
+    const trimmed = text.trim();
+    if (state.covered.has(index + 1) || trimmed === '' || trimmed.startsWith('#')) return;
+    state.errors.push(`Line ${index + 1}: ${skippedLineReason(trimmed)}`);
+  });
+}
+
+// dotenv skips a line with '=' when the key has a character it does not
+// allow, so name the key; a line with no '=' is not an entry at all.
+function skippedLineReason(trimmed: string): string {
+  const equals = trimmed.indexOf('=');
+  if (equals === -1) return 'not a KEY=VALUE line.';
+  const name = trimmed.slice(0, equals).replace(/^export\s+/, '').trim();
+  return validateVariableName(name) ?? 'not a KEY=VALUE line.';
 }
 
 /**
  * dotenv.parse() silently drops every line it cannot read (no `=`, a space
- * or `/` in the key, ...) and lets a duplicate key win. Scan the lines
- * first, so that a file with a dropped line is refused, not half applied.
+ * or `/` in the key, ...), reads an unclosed quote as a literal, and lets a
+ * duplicate key win. Scan the file the way dotenv reads it, so that such a
+ * file is refused, not half applied.
  */
 export function scanEnvFile(content: string): string[] {
-  const errors: string[] = [];
-  const seen = new Map<string, number>();
-  let quote: string | null = null;
-  let quoteLine = 0;
-  content.split(/\r?\n/).forEach((line, index) => {
-    if (quote) {
-      if (line.includes(quote)) quote = null;
-      return;
-    }
-    const trimmed = line.trim();
-    if (trimmed === '' || trimmed.startsWith('#')) return;
-    const match = ENV_LINE.exec(line);
-    if (!match) {
-      errors.push(`Line ${index + 1}: not a KEY=VALUE line.`);
-      return;
-    }
-    errors.push(...checkKey(match[1], index + 1, seen));
-    quote = openQuote(match[2]);
-    quoteLine = index + 1;
-  });
-  if (quote) errors.push(`Line ${quoteLine}: the quoted value is never closed.`);
-  return errors;
+  const text = content.replace(/\r\n?/g, '\n');
+  const state: ScanState = { errors: [], seen: new Map(), covered: new Set() };
+  for (const entry of readEnvLines(text, state.covered)) checkEntry(entry, state);
+  checkSkippedLines(text.split('\n'), state);
+  return state.errors.sort((a, b) => lineNumberOf(a) - lineNumberOf(b));
+}
+
+function lineNumberOf(error: string): number {
+  return Number(/^Line (\d+):/.exec(error)?.[1] ?? 0);
 }
 
 export function parseEnvFile(content: string): { variables: EnvVariable[]; errors: string[] } {
   const scanErrors = scanEnvFile(content);
   if (scanErrors.length > 0) return { variables: [], errors: scanErrors };
   const parsed = dotenv.parse(content);
+  const scanned = new Set(readEnvLines(content.replace(/\r\n?/g, '\n'), new Set()).map((e) => e.name));
+  const parsedNames = Object.keys(parsed);
+  if (parsedNames.length !== scanned.size || parsedNames.some((name) => !scanned.has(name))) {
+    return { variables: [], errors: ['dotenv read this file differently from the scan. Check the file for unusual quoting.'] };
+  }
   const variables: EnvVariable[] = [];
   const errors: string[] = [];
   for (const [name, value] of Object.entries(parsed)) {

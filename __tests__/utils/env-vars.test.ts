@@ -159,6 +159,45 @@ describe('scanEnvFile', () => {
   it('reports a quoted value that never closes', () => {
     expect(scanEnvFile('A="open\nB=1\n')).toEqual([expect.stringMatching(/^Line 1: .*never closed/)]);
   });
+
+  // dotenv reads an unclosed quote as a one-line literal and reads the next
+  // lines as keys. The scan must see the same keys, or it misses problems.
+  it('refuses a truncated quoted value even when a later line has a quote', () => {
+    const errors = scanEnvFile('TLS_KEY="-----BEGIN-----\nabc\nDB_PASSWORD=secret\nNAME="ok"\n');
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^Line 1: .*never closed/),
+        expect.stringMatching(/^Line 2: .*KEY=VALUE/),
+      ])
+    );
+  });
+
+  it('still catches a duplicate after an unclosed quote', () => {
+    expect(scanEnvFile('A="open\nTOKEN=real\nB="x"\nTOKEN=evil\n')).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^Line 4: 'TOKEN' is already set on line 2/)])
+    );
+  });
+
+  it('says KEY: VALUE is not supported', () => {
+    expect(scanEnvFile('A: 1\n')).toEqual([expect.stringMatching(/^Line 1: .*KEY: VALUE.*use KEY=VALUE/)]);
+    expect(scanEnvFile('A: b=c\n')).toEqual([expect.stringMatching(/^Line 1: .*KEY: VALUE.*use KEY=VALUE/)]);
+  });
+
+  it('handles CRLF line endings and a quoted value with a comment after it', () => {
+    expect(scanEnvFile('A=1\r\nB="two" # note\r\nC=\'x\'\r\n')).toEqual([]);
+  });
+});
+
+describe('parseEnvFile cross-check', () => {
+  it('gives the same keys and values as dotenv for a valid file', () => {
+    const { variables, errors } = parseEnvFile('A=1\nexport B="x\ny"\nC=\'q\' # c\n');
+    expect(errors).toEqual([]);
+    expect(variables).toEqual([
+      { name: 'A', value: '1' },
+      { name: 'B', value: 'x\ny' },
+      { name: 'C', value: 'q' },
+    ]);
+  });
 });
 
 describe('maskValue', () => {

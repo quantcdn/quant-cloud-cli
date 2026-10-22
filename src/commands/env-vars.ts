@@ -100,10 +100,12 @@ function visibleVariables(variables: EnvVariable[], showValues?: boolean): EnvVa
 }
 
 function printVariablesTable(variables: EnvVariable[], target: VariablesTarget, showValues?: boolean): void {
-  const width = Math.max(4, ...variables.map((v) => v.name.length));
+  // Sanitize first, so the column width is measured on what is printed.
+  const rows = variables.map((v) => ({ name: sanitizeForTerminal(v.name), value: sanitizeForTerminal(v.value) }));
+  const width = Math.max(4, ...rows.map((row) => row.name.length));
   console.log(chalk.bold(`${'NAME'.padEnd(width)}  VALUE`));
-  for (const variable of variables) {
-    console.log(`${chalk.cyan(sanitizeForTerminal(variable.name).padEnd(width))}  ${sanitizeForTerminal(variable.value)}`);
+  for (const row of rows) {
+    console.log(`${chalk.cyan(row.name.padEnd(width))}  ${row.value}`);
   }
   console.log(chalk.gray(`\n${variables.length} variable(s) on ${targetLabel(target)}`));
   if (!showValues) console.log(chalk.gray('Values are hidden. Use --show-values to print them.'));
