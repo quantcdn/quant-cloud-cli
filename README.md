@@ -129,6 +129,35 @@ qc env list                     # Still finds .quant.yml at project root
 - `qc env logs [envId]` - Stream environment logs (supports --follow)
 - `qc env metrics [envId]` - Live metrics dashboard with real-time updates
 
+### Environment Variables
+- `qc env vars list` - List variables of the environment (names and values, `--json` for JSON)
+- `qc env vars get <KEY>` - Print the raw value of one variable (script-friendly)
+- `qc env vars set <KEY> <VALUE>` - Set one variable
+- `qc env vars set <KEY> --stdin` - Set one variable, reading the value from stdin (keeps it out of argv and shell history)
+- `qc env vars set --file .env` - Set every variable in a `.env` file; variables not in the file are kept
+- `qc env vars unset <KEY>` - Remove a variable
+
+All commands target the active environment, or `--org`, `--app`, `--env`, `--platform`.
+
+**Changes do not redeploy.** A set or unset is stored on the environment and
+takes effect on the next redeploy (`qc env state redeploy --env <env>`).
+
+```bash
+qc env vars list --env staging
+DEBUG=$(qc env vars get APP_DEBUG --env staging)
+printf '%s' "$API_TOKEN" | qc env vars set API_TOKEN --stdin --env production
+qc env vars set --file .env.production --env production
+qc env vars unset LEGACY_FLAG --env production
+qc env state redeploy --env production
+```
+
+`--file` writes each variable with its own request. It never uses the bulk
+replace endpoint, so it cannot delete variables that are absent from the file.
+Empty values are rejected (the API requires a value); use `unset` instead.
+
+Environment **secrets** are not yet available from the CLI: the public v3 API
+has no secrets endpoint. Manage secrets in the dashboard.
+
 ### SSH Access
 - `qc ssh [--container=name]` - SSH into cloud environment via AWS ECS Exec (defaults to interactive bash)
 - `qc ssh --command="shell_or_command"` - Run specific shell or one-shot command (non-interactive by default)
