@@ -2,6 +2,7 @@ import { describe, it, expect, jest, beforeEach, beforeAll, afterEach, afterAll 
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { createRequire } from 'module';
 
 // Real config.ts against a temporary HOME; only .quant.yml discovery is mocked.
 const home = mkdtempSync(join(tmpdir(), 'qc-home-'));
@@ -42,6 +43,8 @@ const readCreds = () => JSON.parse(readFileSync(credFile, 'utf-8'));
 let ctx: typeof import('../../src/utils/context.js');
 let Command: typeof import('commander').Command;
 let orgCommand: typeof import('../../src/commands/org.js').orgCommand;
+let envVarsCommand: typeof import('../../src/commands/env-vars.js').envVarsCommand;
+let axios: typeof import('axios').default;
 
 beforeAll(async () => {
   const { CONFIG_FILE } = await import('../../src/utils/config.js');
@@ -49,6 +52,9 @@ beforeAll(async () => {
   ctx = await import('../../src/utils/context.js');
   ({ Command } = await import('commander'));
   ({ orgCommand } = await import('../../src/commands/org.js'));
+  ({ envVarsCommand } = await import('../../src/commands/env-vars.js'));
+  // The SDK is CommonJS, so mock the same CommonJS axios instance it calls.
+  axios = createRequire(import.meta.url)('axios').default ?? createRequire(import.meta.url)('axios');
 });
 
 beforeEach(() => {
@@ -107,6 +113,28 @@ describe('one platform per command (no mixing)', () => {
     expect(saved.platforms.quantgov.organizations).toHaveLength(1);
     expect(saved.platforms.quantcdn.organizations).toBeUndefined();
     expect(saved.activePlatform).toBe('quantcdn');
+  });
+});
+
+describe('qc env vars uses the same resolver', () => {
+  it('list --platform quantgov sends the gov host and gov token, not the active platform', async () => {
+    const requestMock = jest.spyOn(axios, 'request').mockResolvedValue({ data: { variables: [] }, status: 200 } as any);
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const program = new Command();
+    envVarsCommand(program.command('env'));
+    await program.parseAsync([
+      'node', 'qc', 'env', 'vars', 'list', '--platform', 'quantgov', '--app', 'gov-app', '--env', 'prod', '--json',
+    ]);
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    const args: any = requestMock.mock.calls[0][0];
+    expect(args.url).toContain('https://gov.example');
+    expect(args.url).toContain('/gov-org/');
+    expect(args.url).not.toContain('cdn.example');
+    expect(args.headers.Authorization).toBe('Bearer tok-gov');
+    expect(readCreds().activePlatform).toBe('quantcdn');
   });
 });
 
