@@ -36,20 +36,6 @@ async function loadPlatformAuth(platformId: string): Promise<AuthConfig> {
   return auth;
 }
 
-/**
- * Resolves auth for the requested platform (CLI flag > .quant.yml), or the active platform.
- */
-async function resolveAuth(platformId?: string): Promise<AuthConfig> {
-  if (platformId) {
-    return loadPlatformAuth(platformId);
-  }
-  const auth = await getActivePlatformConfig();
-  if (!auth || !auth.token) {
-    throw new Error('Not authenticated. Run `quant-cloud login` to authenticate.');
-  }
-  return auth;
-}
-
 function describe(values: Record<string, string | undefined>): string {
   return Object.entries(values)
     .filter(([, v]) => v)
@@ -68,10 +54,6 @@ function logContextSources(overrides: ContextOverrides, projectConfig: ProjectCo
   logger.debug(`Effective context: org=${ctx.activeOrganization}, app=${ctx.activeApplication}, env=${ctx.activeEnvironment}`);
 }
 
-/**
- * Resolves the effective context by merging command-line overrides, project config, and stored context
- * Priority: CLI flags > .quant.yml > stored config
- */
 /**
  * Returns the platform id requested by flag or .quant.yml, or undefined for the active platform.
  */
@@ -102,12 +84,19 @@ export async function saveEffectiveConfig(updates: Partial<AuthConfig>, platform
   await saveActivePlatformConfig(updates);
 }
 
+/**
+ * Resolves the effective context by merging command-line overrides, project config, and stored context
+ * Priority: CLI flags > .quant.yml > stored config
+ */
 export async function resolveEffectiveContext(overrides: ContextOverrides = {}): Promise<EffectiveContext> {
   // Get project config from .quant.yml file
   const projectConfig = getProjectConfig();
 
   // Platform priority: CLI flag > .quant.yml > active platform. Never persisted.
-  const auth = await resolveAuth(requestedPlatform(overrides.platform));
+  const auth = await getEffectiveAuth(overrides.platform);
+  if (!auth || !auth.token) {
+    throw new Error('Not authenticated. Run `quant-cloud login` to authenticate.');
+  }
 
   // Apply in priority order: CLI flags > project config > stored config
   const effectiveContext: EffectiveContext = {

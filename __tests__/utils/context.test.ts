@@ -1,12 +1,14 @@
 import { describe, it, expect, jest, beforeEach, beforeAll } from '@jest/globals';
 
 const mockLoadMulti = jest.fn<(...args: any[]) => any>();
+const mockSaveActive = jest.fn<(...args: any[]) => any>();
+const mockSaveNamed = jest.fn<(...args: any[]) => any>();
 const mockGetProjectConfig = jest.fn<(...args: any[]) => any>();
 
 jest.unstable_mockModule('../../src/utils/config.js', () => ({
   loadMultiPlatformConfig: mockLoadMulti,
-  saveActivePlatformConfig: jest.fn(),
-  savePlatformUpdates: jest.fn(),
+  saveActivePlatformConfig: mockSaveActive,
+  savePlatformUpdates: mockSaveNamed,
   getActivePlatformConfig: async () => {
     const m = await mockLoadMulti();
     const { platformInfo, ...auth } = m.platforms[m.activePlatform];
@@ -72,6 +74,7 @@ describe('resolveEffectiveContext platform selection', () => {
   it('does not save or change the active platform', async () => {
     await resolveEffectiveContext({ platform: 'quantgov' });
     expect(mockLoadMulti).toHaveBeenCalled();
-    // only loadMultiPlatformConfig is mocked: any save/switch call would throw
+    expect(mockSaveActive).not.toHaveBeenCalled();
+    expect(mockSaveNamed).not.toHaveBeenCalled();
   });
 });

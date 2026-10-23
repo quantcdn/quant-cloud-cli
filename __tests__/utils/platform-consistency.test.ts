@@ -12,6 +12,16 @@ jest.unstable_mockModule('../../src/utils/project-config.js', () => ({
   getProjectConfig: mockGetProjectConfig,
 }));
 
+// Safety: never touch the real ~/.quant/credentials.
+function assertIsolated(configFile: string): void {
+  if (!configFile.startsWith(home)) {
+    throw new Error(`refusing to run: CONFIG_FILE is ${configFile}`);
+  }
+}
+if (!process.env.QUANT_CONFIG_DIR || !process.env.QUANT_CONFIG_DIR.startsWith(home)) {
+  throw new Error('refusing to run: QUANT_CONFIG_DIR is not the temp dir');
+}
+
 const info = (id: string, host: string) => ({ id, name: id, host });
 const creds = {
   activePlatform: 'quantcdn',
@@ -34,11 +44,8 @@ let Command: typeof import('commander').Command;
 let orgCommand: typeof import('../../src/commands/org.js').orgCommand;
 
 beforeAll(async () => {
-  // Safety: never touch the real ~/.quant/credentials.
   const { CONFIG_FILE } = await import('../../src/utils/config.js');
-  if (!CONFIG_FILE.startsWith(home)) {
-    throw new Error(`refusing to run: CONFIG_FILE is ${CONFIG_FILE}`);
-  }
+  assertIsolated(CONFIG_FILE);
   ctx = await import('../../src/utils/context.js');
   ({ Command } = await import('commander'));
   ({ orgCommand } = await import('../../src/commands/org.js'));
@@ -50,7 +57,10 @@ beforeEach(() => {
   mockGetProjectConfig.mockReturnValue({});
 });
 
+const realFetch = globalThis.fetch;
+
 afterEach(() => {
+  globalThis.fetch = realFetch;
   jest.restoreAllMocks();
 });
 

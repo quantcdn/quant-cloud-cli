@@ -35,7 +35,7 @@ npx @quantcdn/quant-cloud-cli
    qc login
    ```
    Select your platform (QuantGov Cloud or Quant Cloud), authenticate via browser.
-   For a custom endpoint, run `qc login --endpoint <url>`. The CLI saves it as the platform `custom`.
+   For a custom endpoint, run `qc login --endpoint <url>`. The CLI derives the platform id from the host. Run `qc platform list` to read the id.
    To change platform later, run `qc platform switch`.
 
 2. **Check authentication status:**
@@ -63,7 +63,7 @@ For project-specific workflows, create a `.quant.yml` file at your project root:
 
 ```yaml
 # .quant.yml - Project configuration
-platform: quantcdn      # or quantgov, custom (a stored platform id)
+platform: quantcdn      # a stored platform id: quantcdn, quantgov, or a custom id (see qc platform list)
 org: my-organization
 app: my-application
 env: development        # default environment
@@ -104,7 +104,7 @@ qc env list                     # Still finds .quant.yml at project root
 - `qc whoami` - Display current user and authentication status
 
 ### Platform Management
-The active platform comes from `qc login` and `qc platform switch`. Use `--platform <id>` or `platform:` in `.quant.yml` to use another logged-in platform for one command. This does not change the active platform. If you are not logged in to that platform, the command fails.
+The active platform comes from `qc login` and `qc platform switch`. Use `--platform <id>` or `platform:` in `.quant.yml` to use another logged-in platform for one command. This does not change the active platform. If you are not logged in to that platform, the command fails. Read the ids from `qc platform list`. The `qc org` commands have no `--platform` option. Set `platform:` in `.quant.yml` to use another platform with them.
 - `qc platform list` - List all authenticated platforms
 - `qc platform switch` - Switch between authenticated platforms
 - `qc platform current` - Show currently active platform
@@ -351,7 +351,7 @@ Create a `.quant.yml` file at your project root for automatic context detection:
 
 ```yaml
 # .quant.yml
-platform: quantcdn    # Platform id: quantcdn, quantgov or custom
+platform: quantcdn    # Platform id from qc platform list
 org: my-org           # Organization machine name
 app: my-application   # Application machine name  
 env: development      # Default environment name
