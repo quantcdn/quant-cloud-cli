@@ -100,8 +100,10 @@ async function main() {
   if (shouldShowFullBanner) {
     displayBanner();
     await displayContext();
-  } else {
-    // Show slim banner for subcommands to maintain visual feedback
+  } else if (process.stdout.isTTY) {
+    // Show slim banner for subcommands to maintain visual feedback.
+    // Skip it when stdout is piped, so output such as
+    // `$(qc env vars get KEY)` holds only the command's own output.
     displaySlimBanner();
   }
 
