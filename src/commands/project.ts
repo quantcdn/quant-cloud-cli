@@ -4,7 +4,7 @@ import inquirer from 'inquirer';
 import { createSpinner } from '../utils/spinner.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
-import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth, saveEffectiveConfig } from '../utils/context.js';
 
 const logger = new Logger('Project');
 
@@ -107,7 +107,7 @@ async function handleProjectList(options: ProjectOptions) {
 
 async function handleProjectSelect(projectName?: string, options?: ProjectOptions) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -166,9 +166,9 @@ async function handleProjectSelect(projectName?: string, options?: ProjectOption
     }
     
     // Save the selected project (always use machine_name)
-    await saveActivePlatformConfig({
+    await saveEffectiveConfig({
       activeProject: targetProject.machine_name
-    });
+    }, options?.platform);
     
     const displayName = targetProject.name || targetProject.machine_name;
     logger.info(`Selected project: ${chalk.green(displayName)}`);
@@ -184,7 +184,7 @@ async function handleProjectSelect(projectName?: string, options?: ProjectOption
 
 async function handleProjectCurrent() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

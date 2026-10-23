@@ -5,6 +5,8 @@ const mockGetProjectConfig = jest.fn<(...args: any[]) => any>();
 
 jest.unstable_mockModule('../../src/utils/config.js', () => ({
   loadMultiPlatformConfig: mockLoadMulti,
+  saveActivePlatformConfig: jest.fn(),
+  savePlatformUpdates: jest.fn(),
   getActivePlatformConfig: async () => {
     const m = await mockLoadMulti();
     const { platformInfo, ...auth } = m.platforms[m.activePlatform];

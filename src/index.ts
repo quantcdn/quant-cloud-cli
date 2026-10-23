@@ -15,7 +15,7 @@ import { platformCommand } from './commands/platform.js';
 import { backupCommand } from './commands/backup.js';
 import { vrtCommand } from './commands/vrt.js';
 import { crawlerCommand } from './commands/crawler.js';
-import { getActivePlatformConfig } from './utils/config.js';
+import { getEffectiveAuth } from './utils/context.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -47,7 +47,7 @@ function displaySlimBanner() {
 
 async function displayContext() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       console.log(chalk.yellow('⚠ Not authenticated - run ') + chalk.cyan('qc login') + chalk.yellow(' to get started\n'));

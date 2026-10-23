@@ -5,7 +5,7 @@ import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
 
 inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
 import { createSpinner } from '../utils/spinner.js';
-import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth, saveEffectiveConfig } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { Application } from '../types/auth.js';
@@ -77,7 +77,7 @@ async function handleAppList(options: AppOptions) {
       return;
     }
 
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     logger.info('\nApplications:');
     apps.forEach((app) => {
@@ -147,7 +147,7 @@ async function handleAppList(options: AppOptions) {
 
 async function handleAppSelect(appId?: string, options?: AppOptions) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -259,10 +259,10 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
       
       if (environments.length === 1) {
         // Auto-select single environment
-        await saveActivePlatformConfig({
+        await saveEffectiveConfig({
           activeApplication: targetApp.appName,
           activeEnvironment: environments[0].envName
-        });
+        }, options?.platform);
         logger.info(`Auto-selected environment: ${chalk.magenta(environments[0].envName)}`);
         return;
       }
@@ -294,10 +294,10 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
       ]);
       
       // Save the selected application and environment
-      await saveActivePlatformConfig({
+      await saveEffectiveConfig({
         activeApplication: targetApp.appName,
         activeEnvironment: selectedEnvId
-      });
+      }, options?.platform);
       
       logger.info(`Selected environment: ${chalk.magenta(selectedEnvId)}`);
       logger.info(`${chalk.gray('Context:')} ${chalk.green(auth.activeOrganization || 'default')}/${chalk.blue(targetApp.appName)}/${chalk.magenta(selectedEnvId)}`);
@@ -305,10 +305,10 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
     } catch (envError) {
       envSpinner.fail('Failed to load environments');
       logger.warn(`Could not load environments for app '${targetApp.appName}'. Environment context cleared.`);
-      await saveActivePlatformConfig({
+      await saveEffectiveConfig({
         activeApplication: targetApp.appName,
         activeEnvironment: undefined
-      });
+      }, options?.platform);
     }
     
   } catch (error) {
@@ -318,7 +318,7 @@ async function handleAppSelect(appId?: string, options?: AppOptions) {
 
 async function handleAppCurrent() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

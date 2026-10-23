@@ -1,4 +1,4 @@
-import { getActivePlatformConfig, loadMultiPlatformConfig } from './config.js';
+import { getActivePlatformConfig, loadMultiPlatformConfig, saveActivePlatformConfig, savePlatformUpdates } from './config.js';
 import type { AuthConfig } from '../types/auth.js';
 import { getProjectConfig, ProjectConfig } from './project-config.js';
 import { Logger } from './logger.js';
@@ -72,12 +72,42 @@ function logContextSources(overrides: ContextOverrides, projectConfig: ProjectCo
  * Resolves the effective context by merging command-line overrides, project config, and stored context
  * Priority: CLI flags > .quant.yml > stored config
  */
+/**
+ * Returns the platform id requested by flag or .quant.yml, or undefined for the active platform.
+ */
+export function requestedPlatform(flag?: string): string | undefined {
+  return flag || getProjectConfig().platform || undefined;
+}
+
+/**
+ * Auth for the effective platform (flag > .quant.yml > active). Returns null if the
+ * active platform has no login. Throws if a requested platform has no stored login.
+ * Every command must use this instead of getActivePlatformConfig() so that host,
+ * token and stored org/app context always come from the same platform.
+ */
+export async function getEffectiveAuth(platformFlag?: string): Promise<AuthConfig | null> {
+  const id = requestedPlatform(platformFlag);
+  return id ? loadPlatformAuth(id) : getActivePlatformConfig();
+}
+
+/**
+ * Persists context updates to the effective platform (never switches the active platform).
+ */
+export async function saveEffectiveConfig(updates: Partial<AuthConfig>, platformFlag?: string): Promise<void> {
+  const id = requestedPlatform(platformFlag);
+  if (id) {
+    await savePlatformUpdates(id, updates);
+    return;
+  }
+  await saveActivePlatformConfig(updates);
+}
+
 export async function resolveEffectiveContext(overrides: ContextOverrides = {}): Promise<EffectiveContext> {
   // Get project config from .quant.yml file
   const projectConfig = getProjectConfig();
 
   // Platform priority: CLI flag > .quant.yml > active platform. Never persisted.
-  const auth = await resolveAuth(overrides.platform || projectConfig.platform);
+  const auth = await resolveAuth(requestedPlatform(overrides.platform));
 
   // Apply in priority order: CLI flags > project config > stored config
   const effectiveContext: EffectiveContext = {
