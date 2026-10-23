@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { createSpinner } from '../utils/spinner.js';
-import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth, saveEffectiveConfig } from '../utils/context.js';
 import { UserInfo } from '../types/auth.js';
 import { Logger } from '../utils/logger.js';
 
@@ -33,7 +33,7 @@ export function orgCommand(program: Command) {
 
 async function handleOrgList() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -91,7 +91,7 @@ async function handleOrgList() {
     if (!auth.activeOrganization && userInfo.organizations.length > 0) {
       updates.activeOrganization = userInfo.organizations[0].machine_name;
     }
-    await saveActivePlatformConfig(updates);
+    await saveEffectiveConfig(updates);
 
   } catch (error) {
     logger.error('Failed to list organizations:', error);
@@ -100,7 +100,7 @@ async function handleOrgList() {
 
 async function handleOrgSelect(orgId?: string) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -148,7 +148,7 @@ async function handleOrgSelect(orgId?: string) {
     
     // Update active organization
     // Update active organization and clear application/environment context
-    await saveActivePlatformConfig({
+    await saveEffectiveConfig({
       activeOrganization: targetOrg.machine_name,
       activeApplication: undefined,
       activeEnvironment: undefined
@@ -163,7 +163,7 @@ async function handleOrgSelect(orgId?: string) {
 
 async function handleOrgCurrent() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

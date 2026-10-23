@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { getActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
 import { describeAwsCliSpawnError, spawnAwsCli } from '../utils/aws-cli.js';
@@ -41,7 +41,7 @@ async function handleSSH(options: SSHOptions) {
       console.log(chalk.gray(`🔧 Non-interactive mode: org=${options.org || 'auto'}, app=${options.app || 'auto'}, env=${options.env || 'auto'}, container=${options.container || 'auto'}`));
     }
 
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     if (!auth || !auth.token) {
       spinner.fail('Not authenticated. Run `quant-cloud login` to authenticate.');
       return;

@@ -3,8 +3,7 @@ import chalk from 'chalk';
 import gradient from 'gradient-string';
 import inquirer from 'inquirer';
 import autocomplete from 'inquirer-autocomplete-prompt';
-import { getActivePlatformConfig, saveActivePlatformConfig } from '../utils/config.js';
-import { resolveEffectiveContext, validateContext } from '../utils/context.js';
+import { getEffectiveAuth, saveEffectiveConfig, resolveEffectiveContext, validateContext } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
@@ -173,7 +172,7 @@ async function handleEnvList(options: EnvOptions) {
       return;
     }
 
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     logger.info('\nEnvironments:');
     environments.forEach((env: any, index: number) => {
@@ -229,7 +228,7 @@ async function handleEnvList(options: EnvOptions) {
 
 async function handleEnvSelect(envId?: string, options?: EnvOptions) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -324,7 +323,7 @@ async function handleEnvSelect(envId?: string, options?: EnvOptions) {
     }
     
     // Update active environment
-    await saveActivePlatformConfig({ activeEnvironment: targetEnvId });
+    await saveEffectiveConfig({ activeEnvironment: targetEnvId }, options?.platform);
     
     logger.info(`${chalk.green('✓')} Selected environment: ${chalk.cyan(targetEnvId)}`);
     
@@ -335,7 +334,7 @@ async function handleEnvSelect(envId?: string, options?: EnvOptions) {
 
 async function handleEnvCurrent() {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth();
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -567,7 +566,7 @@ async function handleEnvCreate(envName?: string, options?: EnvCreateOptions) {
         ]);
 
         if (setActive) {
-          await saveActivePlatformConfig({ activeEnvironment: targetEnvName });
+          await saveEffectiveConfig({ activeEnvironment: targetEnvName }, options?.platform);
           logger.info(`${chalk.green('✓')} Active environment set to: ${chalk.cyan(targetEnvName)}`);
         }
 

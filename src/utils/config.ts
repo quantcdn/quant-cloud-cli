@@ -3,7 +3,7 @@ import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { AuthConfig, MultiPlatformConfig, PlatformInfo } from '../types/auth.js';
 
-const CONFIG_DIR = join(homedir(), '.quant');
+const CONFIG_DIR = process.env.QUANT_CONFIG_DIR || join(homedir(), '.quant');
 export const CONFIG_FILE = join(CONFIG_DIR, 'credentials');
 export const VRT_CONFIG_FILE = join(CONFIG_DIR, 'vrt-config.json');
 
@@ -201,30 +201,28 @@ function generatePlatformInfo(host: string): PlatformInfo {
   }
 }
 
+// Helper to save updates to a named platform
+export async function savePlatformUpdates(platformId: string, updates: Partial<AuthConfig>): Promise<void> {
+  const multiConfig = await loadMultiPlatformConfig();
+  const current = multiConfig.platforms[platformId];
+  if (!current) {
+    throw new Error(`Platform configuration not found: ${platformId}`);
+  }
+
+  const { platformInfo, ...currentAuthConfig } = current;
+  multiConfig.platforms[platformId] = { ...currentAuthConfig, ...updates, platformInfo };
+  await saveMultiPlatformConfig(multiConfig);
+}
+
 // Helper to save updates to the active platform
 export async function saveActivePlatformConfig(updates: Partial<AuthConfig>): Promise<void> {
   const multiConfig = await loadMultiPlatformConfig();
-  
+
   if (!multiConfig.activePlatform) {
     throw new Error('No active platform set');
   }
-  
-  const currentPlatformConfig = multiConfig.platforms[multiConfig.activePlatform];
-  if (!currentPlatformConfig) {
-    throw new Error('Active platform configuration not found');
-  }
-  
-  // Extract current auth config and apply updates
-  const { platformInfo, ...currentAuthConfig } = currentPlatformConfig;
-  const updatedAuthConfig = { ...currentAuthConfig, ...updates };
-  
-  // Save back to multi-platform config
-  multiConfig.platforms[multiConfig.activePlatform] = {
-    ...updatedAuthConfig,
-    platformInfo
-  };
-  
-  await saveMultiPlatformConfig(multiConfig);
+
+  await savePlatformUpdates(multiConfig.activePlatform, updates);
 }
 
 // Backward compatibility - update existing functions to use active platform

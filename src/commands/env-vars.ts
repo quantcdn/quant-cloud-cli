@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { getActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
 import {
@@ -57,7 +57,7 @@ function missingContextMessage(orgId?: string, appId?: string): string {
 }
 
 async function resolveVarsContext(options: VarsContextOptions): Promise<VarsContext | null> {
-  const auth = await getActivePlatformConfig();
+  const auth = await getEffectiveAuth(options.platform);
   if (!auth || !auth.token) {
     fail('Not authenticated. Run `qc login` to authenticate.');
     return null;

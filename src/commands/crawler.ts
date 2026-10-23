@@ -5,7 +5,7 @@ import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
 import { createSpinner } from '../utils/spinner.js';
 import { ApiClient } from '../utils/api.js';
 import { Logger } from '../utils/logger.js';
-import { getActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth } from '../utils/context.js';
 
 // Register the autocomplete prompt
 inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
@@ -47,7 +47,7 @@ interface CrawlerOptions {
 
 async function handleCrawlerRun(crawlerId?: string, options?: CrawlerOptions) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');
@@ -198,7 +198,7 @@ async function handleCrawlerRun(crawlerId?: string, options?: CrawlerOptions) {
 
 async function handleCrawlerList(options?: CrawlerOptions) {
   try {
-    const auth = await getActivePlatformConfig();
+    const auth = await getEffectiveAuth(options?.platform);
     
     if (!auth || !auth.token) {
       logger.info('Not authenticated. Run `quant-cloud login` to authenticate.');

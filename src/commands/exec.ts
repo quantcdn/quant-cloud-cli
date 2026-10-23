@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { getActivePlatformConfig } from '../utils/config.js';
+import { getEffectiveAuth } from '../utils/context.js';
 import { ApiClient } from '../utils/api.js';
 import { createSpinner } from '../utils/spinner.js';
 import { pollCommandRun } from '../utils/exec-run.js';
@@ -36,7 +36,7 @@ function resolveIntervalMs(interval?: string): number {
 async function resolveExecContext(
   options: ExecContextOptions
 ): Promise<{ client: ApiClient; orgId: string; appId: string; envId: string } | null> {
-  const auth = await getActivePlatformConfig();
+  const auth = await getEffectiveAuth(options.platform);
   if (!auth || !auth.token) {
     console.log(chalk.red('Not authenticated. Run `quant-cloud login` to authenticate.'));
     process.exitCode = 1;

@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { getActivePlatformConfig } from '../utils/config.js';
 import { resolveEffectiveContext } from '../utils/context.js';
 import { Logger } from '../utils/logger.js';
 
