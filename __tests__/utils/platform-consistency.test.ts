@@ -136,6 +136,29 @@ describe('qc env vars uses the same resolver', () => {
     expect(args.headers.Authorization).toBe('Bearer tok-gov');
     expect(readCreds().activePlatform).toBe('quantcdn');
   });
+
+  it('list --platform quantgov works when only quantgov is logged in (no false "Not authenticated")', async () => {
+    writeFileSync(credFile, JSON.stringify({
+      activePlatform: 'quantcdn',
+      platforms: { quantgov: creds.platforms.quantgov },
+    }));
+    const requestMock = jest.spyOn(axios, 'request').mockResolvedValue({ data: { variables: [] }, status: 200 } as any);
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    const errorMock = jest.spyOn(console, 'error').mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    const program = new Command();
+    envVarsCommand(program.command('env'));
+    await program.parseAsync([
+      'node', 'qc', 'env', 'vars', 'list', '--platform', 'quantgov', '--app', 'gov-app', '--env', 'prod', '--json',
+    ]);
+
+    const errors = errorMock.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(errors).not.toContain('Not authenticated');
+    expect(process.exitCode).toBeUndefined();
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect((requestMock.mock.calls[0][0] as any).headers.Authorization).toBe('Bearer tok-gov');
+  });
 });
 
 afterAll(() => rmSync(home, { recursive: true, force: true }));
