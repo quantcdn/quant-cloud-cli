@@ -9,6 +9,7 @@ import { Logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
 import { Environment } from '../types/auth.js';
 import { envVarsCommand } from './env-vars.js';
+import { envSecretsCommand } from './env-secrets.js';
 
 // Register the autocomplete prompt
 inquirer.registerPrompt('autocomplete', autocomplete);
@@ -120,6 +121,7 @@ export function envCommand(program: Command) {
     });
 
   envVarsCommand(env);
+  envSecretsCommand(env);
 }
 
 interface EnvOptions {

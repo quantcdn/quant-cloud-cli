@@ -37,9 +37,17 @@ export function validateVariableName(name: string): string | null {
 }
 
 // The v3 API validates `value` as required|string, so an empty value is a 422.
-export function validateVariableValue(name: string, value: string): string | null {
+// Words used in user messages, so `qc env secrets` can share the input helpers.
+export interface KindLabels {
+  noun: string; // 'variable' or 'secret'
+  command: string; // 'qc env vars' or 'qc env secrets'
+}
+
+export const VARIABLE_LABELS: KindLabels = { noun: 'variable', command: 'qc env vars' };
+
+export function validateVariableValue(name: string, value: string, labels: KindLabels = VARIABLE_LABELS): string | null {
   if (value.length > 0) return null;
-  return `The value for '${name}' is empty. The API rejects empty values. To remove a variable, use \`qc env vars unset ${name}\`.`;
+  return `The value for '${name}' is empty. The API rejects empty values. To remove a ${labels.noun}, use \`${labels.command} unset ${name}\`.`;
 }
 
 function toEnvVariable(item: unknown): EnvVariable | null {
@@ -163,7 +171,7 @@ function lineNumberOf(error: string): number {
   return Number(/^Line (\d+):/.exec(error)?.[1] ?? 0);
 }
 
-export function parseEnvFile(content: string): { variables: EnvVariable[]; errors: string[] } {
+export function parseEnvFile(content: string, labels: KindLabels = VARIABLE_LABELS): { variables: EnvVariable[]; errors: string[] } {
   const scanErrors = scanEnvFile(content);
   if (scanErrors.length > 0) return { variables: [], errors: scanErrors };
   const parsed = dotenv.parse(content);
@@ -175,7 +183,7 @@ export function parseEnvFile(content: string): { variables: EnvVariable[]; error
   const variables: EnvVariable[] = [];
   const errors: string[] = [];
   for (const [name, value] of Object.entries(parsed)) {
-    const error = validateVariableName(name) ?? validateVariableValue(name, value);
+    const error = validateVariableName(name) ?? validateVariableValue(name, value, labels);
     if (error) errors.push(error);
     else variables.push({ name, value });
   }
@@ -197,6 +205,7 @@ export interface SetCommandInput {
   value?: string;
   stdin?: boolean;
   file?: string;
+  labels?: KindLabels;
 }
 
 export interface SetInputDeps {
@@ -222,9 +231,10 @@ function resolveFileInput(input: SetCommandInput, deps: SetInputDeps): SetInputR
     const reason = error instanceof Error ? error.message : String(error);
     return { errors: [`Cannot read '${input.file}': ${reason}`] };
   }
-  const { variables, errors } = parseEnvFile(content);
+  const labels = input.labels ?? VARIABLE_LABELS;
+  const { variables, errors } = parseEnvFile(content, labels);
   if (errors.length > 0) return { errors };
-  if (variables.length === 0) return { errors: [`No variables found in '${input.file}'.`] };
+  if (variables.length === 0) return { errors: [`No ${labels.noun}s found in '${input.file}'.`] };
   return { variables };
 }
 
@@ -234,7 +244,8 @@ async function resolveSingleValue(input: SetCommandInput, deps: SetInputDeps): P
   }
   if (input.stdin) {
     const value = await deps.readStdin();
-    return value === '' ? { errors: ['No value received on stdin. Pipe the value in, for example `printf %s "$VALUE" | qc env vars set KEY --stdin`.'] } : value;
+    const command = (input.labels ?? VARIABLE_LABELS).command;
+    return value === '' ? { errors: [`No value received on stdin. Pipe the value in, for example \`printf %s "$VALUE" | ${command} set KEY --stdin\`.`] } : value;
   }
   if (input.value === undefined) {
     return { errors: ['Missing VALUE. To keep the value off the command line, use --stdin.'] };
@@ -247,8 +258,9 @@ export async function resolveSetInput(
   deps: SetInputDeps = defaultDeps
 ): Promise<SetInputResult> {
   if (input.file) return resolveFileInput(input, deps);
+  const labels = input.labels ?? VARIABLE_LABELS;
   if (!input.key) {
-    return { errors: ['Missing KEY. Use `qc env vars set KEY VALUE`, `KEY --stdin`, or `--file <path>`.'] };
+    return { errors: [`Missing KEY. Use \`${labels.command} set KEY VALUE\`, \`KEY --stdin\`, or \`--file <path>\`.`] };
   }
   const nameError = validateVariableName(input.key);
   if (nameError) return { errors: [nameError] };
@@ -256,7 +268,7 @@ export async function resolveSetInput(
   const value = await resolveSingleValue(input, deps);
   if (typeof value !== 'string') return value;
 
-  const valueError = validateVariableValue(input.key, value);
+  const valueError = validateVariableValue(input.key, value, labels);
   if (valueError) return { errors: [valueError] };
   return { variables: [{ name: input.key, value }] };
 }
@@ -312,7 +324,7 @@ export async function unsetVariable(api: VariablesClient, target: VariablesTarge
 
 const STATUS_HINTS: Record<number, string> = {
   401: 'Authentication expired. Run `qc login` to re-authenticate.',
-  403: 'Access denied. Changing variables needs the write_environments permission.',
+  403: 'Access denied. Changing variables or secrets needs the write_environments permission.',
   404: 'Environment not found. Check --org, --app and --env.',
 };
 
