@@ -19,7 +19,7 @@ import {
   validateVariableName,
 } from '../utils/env-vars.js';
 
-interface VarsContextOptions {
+export interface VarsContextOptions {
   org?: string;
   app?: string;
   env?: string;
@@ -45,7 +45,7 @@ interface VarsContext {
   target: VariablesTarget;
 }
 
-function fail(message: string): void {
+export function fail(message: string): void {
   console.error(chalk.red(message));
   process.exitCode = 1;
 }
@@ -56,7 +56,7 @@ function missingContextMessage(orgId?: string, appId?: string): string {
   return 'No environment specified. Use --env or set active environment.';
 }
 
-async function resolveVarsContext(options: VarsContextOptions): Promise<VarsContext | null> {
+export async function resolveVarsContext(options: VarsContextOptions): Promise<VarsContext | null> {
   const auth = await getEffectiveAuth(options.platform);
   if (!auth || !auth.token) {
     fail('Not authenticated. Run `qc login` to authenticate.');
@@ -81,7 +81,7 @@ async function resolveVarsContext(options: VarsContextOptions): Promise<VarsCont
   return { client, target: { orgId, appId, envId } };
 }
 
-function targetLabel(target: VariablesTarget): string {
+export function targetLabel(target: VariablesTarget): string {
   return `${target.orgId}/${target.appId}/${target.envId}`;
 }
 
@@ -235,7 +235,7 @@ async function handleUnset(key: string, options: VarsUnsetOptions): Promise<void
   }
 }
 
-function withContextOptions(cmd: Command): Command {
+export function withContextOptions(cmd: Command): Command {
   return cmd
     .option('--org <org>', 'organization machine name')
     .option('--app <app>', 'application machine name')
