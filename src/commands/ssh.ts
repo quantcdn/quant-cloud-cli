@@ -192,12 +192,15 @@ async function executeAWSCommand(
       return;
     }
 
+    // The task's region must win over AWS_REGION or a profile region in the user's shell.
+    const region = sshAccess.region || 'us-east-1';
     const env = {
       ...process.env,
       AWS_ACCESS_KEY_ID: sshAccess.credentials.accessKeyId || '',
       AWS_SECRET_ACCESS_KEY: sshAccess.credentials.secretAccessKey || '',
       AWS_SESSION_TOKEN: sshAccess.credentials.sessionToken || '',
-      AWS_DEFAULT_REGION: sshAccess.region || 'us-east-1'
+      AWS_REGION: region,
+      AWS_DEFAULT_REGION: region
     };
 
     // Logic:
@@ -219,6 +222,7 @@ async function executeAWSCommand(
 
     const args = [
       'ecs', 'execute-command',
+      '--region', region,
       '--cluster', sshAccess.clusterName || '',
       '--task', sshAccess.taskArn || '',
       '--container', containerName,
