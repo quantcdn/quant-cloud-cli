@@ -18,11 +18,14 @@ export const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const REFRESH_TIMEOUT_MS = 60_000;
 
 /**
- * After an unknown outcome, qc waits this long and sends the same refresh token
- * once more. The portal recovers a rotation whose answer was lost. Tests may
- * lower it.
+ * After an unknown outcome, qc sends the same refresh token again. The portal
+ * answers the previous token with "just rotated" for 30 s after a rotation, and
+ * recovers a lost rotation (a new pair, once) from 30 s to 5 minutes. So qc
+ * waits delayMs after the previous attempt ended, sends at most maxRetries
+ * retries, and sends none when windowMs has passed since the first send.
+ * Tests may lower these values.
  */
-export const recovery = { delayMs: 20_000 };
+export const recovery = { delayMs: 45_000, maxRetries: 2, windowMs: 4 * 60_000 };
 
 /** After this long, qc tells the user that it is still renewing the login. */
 const SLOW_NOTICE_MS = 5_000;
@@ -95,9 +98,17 @@ interface TokenErrorBody {
   error_description?: string;
 }
 
+/** "Just rotated": a request with this token rotated less than 30 s ago, maybe our own. */
+function isJustRotated(body: TokenErrorBody): boolean {
+  return body.error === 'invalid_grant' && /just rotated/i.test(body.error_description ?? '');
+}
+
 function refreshFailure(status: number, body: TokenErrorBody): Error {
   if (status >= 500 || (status >= 200 && status < 300)) {
     return new UnknownRefreshOutcome(`HTTP ${status} without a usable token response`);
+  }
+  if (isJustRotated(body)) {
+    return new UnknownRefreshOutcome(body.error_description as string);
   }
   if (body.error) {
     return new TokenRefreshError(body.error, body.error_description);
@@ -179,32 +190,68 @@ async function refreshLocked(
       return latest ?? auth;
     }
     await lock.verify();
-    const updates = await refreshWithRecovery(latest, lock);
+    const updates = await refreshWithRecovery(latest, store, lock);
     await saveRotation(store, updates);
     logger.debug('Access token refreshed');
     return { ...latest, ...updates };
   });
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function tokenFields(auth: AuthConfig): Partial<AuthConfig> {
+  return { token: auth.token, refreshToken: auth.refreshToken, expiresAt: auth.expiresAt };
+}
+
 /**
- * requestRefresh, sent once more with the same refresh token after an unknown
- * outcome. The portal answers a lost rotation with a new pair. Never more than
- * one retry, and never after a definite 4xx answer. The lock is kept fresh,
- * because both attempts and the wait take longer than LOCK_STALE_MS.
+ * Waits before a recovery retry, with the lock kept fresh. Returns the stored
+ * tokens when they changed during the wait (the retry is then not sent), or
+ * null to send the retry. Throws lastError when the window has passed.
  */
-async function refreshWithRecovery(auth: AuthConfig, lock: HeldLock): Promise<Partial<AuthConfig>> {
-  try {
-    return await requestRefresh(auth);
-  } catch (error) {
-    if (!(error instanceof UnknownRefreshOutcome)) {
-      throw error;
-    }
-    logger.debug(`Refresh outcome unknown (${error.message}); retrying once in ${recovery.delayMs} ms`);
-    await lock.touch();
-    await new Promise((resolve) => setTimeout(resolve, recovery.delayMs));
-    await lock.touch();
-    return requestRefresh(auth);
+async function prepareRetry(
+  auth: AuthConfig,
+  store: RefreshStore,
+  lock: HeldLock,
+  firstSend: number,
+  lastError: unknown,
+): Promise<Partial<AuthConfig> | null> {
+  await lock.touch();
+  await sleep(recovery.delayMs);
+  await lock.touch();
+  if (Date.now() - firstSend > recovery.windowMs) {
+    throw lastError;
   }
+  const latest = await store.reload();
+  if (!latest) {
+    throw lastError;
+  }
+  return latest.token !== auth.token ? tokenFields(latest) : null;
+}
+
+/**
+ * requestRefresh, sent again with the same refresh token after an unknown
+ * outcome (see `recovery`). A definite 4xx is never retried. Both waits and all
+ * attempts take longer than LOCK_STALE_MS, so the lock is touched around each wait.
+ */
+async function refreshWithRecovery(auth: AuthConfig, store: RefreshStore, lock: HeldLock): Promise<Partial<AuthConfig>> {
+  const firstSend = Date.now();
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= recovery.maxRetries; attempt++) {
+    const stored = attempt > 0 ? await prepareRetry(auth, store, lock, firstSend, lastError) : null;
+    if (stored) {
+      return stored;
+    }
+    try {
+      return await requestRefresh(auth);
+    } catch (error) {
+      if (!(error instanceof UnknownRefreshOutcome)) {
+        throw error;
+      }
+      lastError = error;
+      logger.debug(`Refresh outcome unknown (${error.message})`);
+    }
+  }
+  throw lastError;
 }
 
 /**

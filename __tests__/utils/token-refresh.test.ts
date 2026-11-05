@@ -65,7 +65,7 @@ describe('refreshIfDue', () => {
     global.fetch = fetchMock as any;
     save.mockResolvedValue(undefined);
     reload.mockImplementation(async () => login(DAY));
-    recovery.delayMs = 5;
+    Object.assign(recovery, { delayMs: 5, maxRetries: 2, windowMs: 240_000 });
   });
 
   afterEach(() => {
@@ -173,12 +173,70 @@ describe('refreshIfDue', () => {
       expect(save).not.toHaveBeenCalled();
     });
 
-    it('never retries more than once', async () => {
+    it('sends at most two retries', async () => {
       fetchMock.mockRejectedValue(new Error('socket hang up'));
-      const auth = login(DAY, { refreshToken: 'qcr_twice' });
+      const auth = login(DAY, { refreshToken: 'qcr_three' });
 
       expect(await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' })).toBe(auth);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('sends no retry after the window since the first send has passed', async () => {
+      Object.assign(recovery, { delayMs: 100, windowMs: 150 });
+      fetchMock.mockResolvedValue(jsonResponse(503, {}));
+      const auth = login(DAY, { refreshToken: 'qcr_window' });
+
+      await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' });
+
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips the retry when the stored token changed during the wait', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(502, {}));
+      const auth = login(DAY, { refreshToken: 'qcr_changed' });
+      const stored = [auth, login(90 * DAY, { token: 'qc_other', refreshToken: 'qcr_other' })];
+      const reloadSeq = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce(stored[0])
+        .mockResolvedValue(stored[1]);
+
+      const result = await refreshIfDue(auth, { save, reload: reloadSeq, lockFile, location: 'creds' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.token).toBe('qc_other');
+      expect(result.refreshToken).toBe('qcr_other');
+    });
+
+    it('treats "just rotated" as unknown: no warning, not refused, and the retry recovers', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const auth = login(DAY, { refreshToken: 'qcr_just' });
+      const justRotated = () => jsonResponse(400, {
+        error: 'invalid_grant',
+        error_description: 'Refresh token was just rotated; reload your stored tokens.',
+      });
+      fetchMock.mockResolvedValueOnce(justRotated()).mockResolvedValueOnce(ok('recovered2'));
+
+      const result = await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' });
+
+      expect(result.token).toBe('qc_recovered2');
+      expect(sentTokens()).toEqual(['qcr_just', 'qcr_just']);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('does not mark a "just rotated" token as refused', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const auth = login(DAY, { refreshToken: 'qcr_just2' });
+      fetchMock.mockResolvedValue(jsonResponse(400, { error: 'invalid_grant', error_description: 'Refresh token was just rotated' }));
+      const store = { save, reload: async () => auth, lockFile, location: 'creds' };
+
+      await refreshIfDue(auth, store);
+      fetchMock.mockClear();
+      fetchMock.mockResolvedValue(ok('later'));
+      const later = await refreshIfDue(auth, store);
+
+      expect(later.token).toBe('qc_later');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
     });
 
     it('does not retry after a definite 4xx', async () => {
@@ -191,17 +249,23 @@ describe('refreshIfDue', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('waits the recovery delay before the retry', async () => {
-      recovery.delayMs = 200;
-      const times: number[] = [];
+    it('waits the recovery delay after the previous attempt ended', async () => {
+      recovery.delayMs = 100;
+      const starts: number[] = [];
+      const ends: number[] = [];
       fetchMock.mockImplementation(async () => {
-        times.push(Date.now());
-        return times.length === 1 ? jsonResponse(502, {}) : ok('late');
+        starts.push(Date.now());
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        ends.push(Date.now());
+        return starts.length < 3 ? jsonResponse(504, {}) : ok('late');
       });
 
-      await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
+      const result = await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
 
-      expect(times[1] - times[0]).toBeGreaterThanOrEqual(190);
+      expect(result.token).toBe('qc_late');
+      expect(starts).toHaveLength(3);
+      expect(starts[1] - ends[0]).toBeGreaterThanOrEqual(95);
+      expect(starts[2] - ends[1]).toBeGreaterThanOrEqual(95);
     });
   });
 });

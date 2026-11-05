@@ -8,7 +8,12 @@ import { randomBytes } from 'crypto';
 export const LOCK_STALE_MS = 90_000;
 
 const POLL_MS = 100;
-const MAX_WAIT_MS = 2 * LOCK_STALE_MS;
+/**
+ * A refresh with recovery retries can hold the lock for about 5 minutes (the
+ * last retry starts within 4 minutes and has a 60 s timeout), so a waiter waits
+ * longer than that. A dead holder is still taken over after LOCK_STALE_MS.
+ */
+const MAX_WAIT_MS = 6 * 60_000;
 const DEFERRED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
 /** What a holder writes into the lock file. `time` is the holder's own clock. */
@@ -190,14 +195,26 @@ function guardProcess(lockFile: string, nonce: string): () => void {
       }
     }
   };
-  const onSignal = (signal: NodeJS.Signals) => {
-    pending.push(signal);
+  const removeListeners = () => {
+    process.off('exit', onExit);
+    DEFERRED_SIGNALS.forEach((signal) => process.off(signal, onSignal));
   };
+  // The first signal waits for the locked work. A second one stops at once.
+  // A process killed by a signal emits no 'exit', so the lock is removed first.
+  function onSignal(signal: NodeJS.Signals) {
+    if (pending.length > 0) {
+      removeListeners();
+      onExit();
+      process.kill(process.pid, signal);
+      return;
+    }
+    pending.push(signal);
+    process.stderr.write('Finishing the Quant login update. Press Ctrl-C again to stop now.\n');
+  }
   process.on('exit', onExit);
   DEFERRED_SIGNALS.forEach((signal) => process.on(signal, onSignal));
   return () => {
-    process.off('exit', onExit);
-    DEFERRED_SIGNALS.forEach((signal) => process.off(signal, onSignal));
+    removeListeners();
     if (pending.length > 0) {
       process.kill(process.pid, pending[0]);
     }
