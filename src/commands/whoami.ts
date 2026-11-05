@@ -17,8 +17,11 @@ export function whoamiCommand(program: Command) {
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/** "12 days" when more than 48 hours are left, else "5h 20m". */
+/** "12 days" when more than 48 hours are left, "5h 20m" when less, "expired" when none. */
 export function formatTimeLeft(ms: number): string {
+  if (ms <= 0) {
+    return 'expired';
+  }
   if (ms > 48 * HOUR_MS) {
     return `${Math.floor(ms / DAY_MS)} days`;
   }
@@ -32,9 +35,11 @@ function printExpiry(expiresAt?: string): void {
     return;
   }
   const timeLeft = new Date(expiresAt).getTime() - Date.now();
-  if (timeLeft > 0) {
-    logger.info(`Expires in: ${chalk.green(formatTimeLeft(timeLeft))}`);
+  if (timeLeft <= 0) {
+    logger.info(`Expires in: ${chalk.red(formatTimeLeft(timeLeft))}`);
+    return;
   }
+  logger.info(`Expires in: ${chalk.green(formatTimeLeft(timeLeft))}`);
 }
 
 function printActiveOrganization(ctx: EffectiveContext, organizations: NonNullable<EffectiveContext['organizations']>): void {
