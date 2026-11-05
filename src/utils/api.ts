@@ -10,6 +10,19 @@ export interface ApiOptions {
   environmentId?: string;
 }
 
+/** The HTTP status of an SDK error: axios sets response.status, older clients set statusCode. */
+function httpStatus(error: any): number | undefined {
+  return error?.statusCode ?? error?.response?.status;
+}
+
+function environmentsNotFoundMessage(error: { body?: { message?: string } }, organizationId: string, applicationId: string): string {
+  const message: string = error.body?.message ?? '';
+  if (message.includes('Application') && message.includes('not found')) {
+    return `Application '${organizationId}/${applicationId}' not found.`;
+  }
+  return `Organization '${organizationId}' not found or no access to environments.`;
+}
+
 export class ApiClient {
   private applicationsApi: ApplicationsApi;
   public environmentsApi: EnvironmentsApi;
@@ -80,12 +93,13 @@ export class ApiClient {
       const response = await this.applicationsApi.listApplications(organizationId);
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
+      if (status === 404) {
         throw new Error(`Organization '${organizationId}' not found or no access to applications.`);
-      } else if (error.statusCode === 403) {
+      } else if (status === 403) {
         throw new Error(`Access denied to applications in organization '${organizationId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch applications: ${error.message || 'Network error'}`);
@@ -109,16 +123,13 @@ export class ApiClient {
       const response = await this.environmentsApi.listEnvironments(organizationId, applicationId);
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
-        if (error.body?.message?.includes('Application') && error.body?.message?.includes('not found')) {
-          throw new Error(`Application '${organizationId}/${applicationId}' not found.`);
-        } else {
-          throw new Error(`Organization '${organizationId}' not found or no access to environments.`);
-        }
-      } else if (error.statusCode === 403) {
+      if (status === 404) {
+        throw new Error(environmentsNotFoundMessage(error, organizationId, applicationId));
+      } else if (status === 403) {
         throw new Error(`Access denied to environments in '${organizationId}/${applicationId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch environments: ${error.message || 'Network error'}`);
@@ -179,12 +190,13 @@ export class ApiClient {
       );
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
+      if (status === 404) {
         throw new Error(`Environment '${organizationId}/${applicationId}/${options.environmentId}' not found or metrics unavailable.`);
-      } else if (error.statusCode === 403) {
+      } else if (status === 403) {
         throw new Error(`Access denied to metrics for '${organizationId}/${applicationId}/${options.environmentId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch metrics: ${error.message || 'Network error'}`);

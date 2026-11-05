@@ -536,4 +536,25 @@ describe('ApiClient', () => {
       await expect(client.getOrganizations()).rejects.toThrow(/not yet implemented/);
     });
   });
+  describe('axios errors (error.response.status)', () => {
+    const axiosError = (status: number) => ({ message: `Request failed with status code ${status}`, response: { status } });
+
+    it('getApplications maps an axios 401 to the login message', async () => {
+      mockListApplications.mockRejectedValue(axiosError(401));
+      const client = new ApiClient('https://api.quantcdn.io', 'token', 'org-1');
+      await expect(client.getApplications()).rejects.toThrow(/Authentication expired/);
+    });
+
+    it('getEnvironments maps an axios 403 to access denied', async () => {
+      mockListEnvironments.mockRejectedValue(axiosError(403));
+      const client = new ApiClient('https://api.quantcdn.io', 'token', 'org-1', 'app-1');
+      await expect(client.getEnvironments()).rejects.toThrow(/Access denied/);
+    });
+
+    it('getEnvironmentMetrics maps an axios 401 to the login message', async () => {
+      mockGetEnvironmentMetrics.mockRejectedValue(axiosError(401));
+      const client = new ApiClient('https://api.quantcdn.io', 'token', 'org-1', 'app-1');
+      await expect(client.getEnvironmentMetrics({ environmentId: 'prod' })).rejects.toThrow(/Authentication expired/);
+    });
+  });
 });
