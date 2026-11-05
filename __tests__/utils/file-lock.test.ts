@@ -30,7 +30,10 @@ describe('withFileLock', () => {
       events.push(`${name}-end`);
     });
     await Promise.all([work('a'), work('b')]);
-    expect(events).toEqual(['a-start', 'a-end', 'b-start', 'b-end']);
+    // Either holder can go first, but they must not overlap.
+    const first = events[0].split('-')[0];
+    const second = first === 'a' ? 'b' : 'a';
+    expect(events).toEqual([`${first}-start`, `${first}-end`, `${second}-start`, `${second}-end`]);
   });
 
   it('takes over a lock whose holder timestamp is stale', async () => {
