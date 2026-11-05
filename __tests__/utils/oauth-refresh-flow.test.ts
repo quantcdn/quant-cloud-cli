@@ -28,6 +28,7 @@ beforeAll(async () => {
   ({ CONFIG_FILE: credFile } = await import('../../src/utils/config.js'));
   ctx = await import('../../src/utils/context.js');
   ({ ApiClient } = await import('../../src/utils/api.js'));
+  (await import('../../src/utils/token-refresh.js')).recovery.delayMs = 5;
 });
 
 afterAll(() => rmSync(home, { recursive: true, force: true }));

@@ -22,6 +22,11 @@ interface LockRecord {
 export interface HeldLock {
   /** Throws when another process has taken the lock over. */
   verify(): Promise<void>;
+  /**
+   * Verifies ownership and writes a new timestamp, so a holder that must keep
+   * the lock longer than LOCK_STALE_MS is not taken over.
+   */
+  touch(): Promise<void>;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -206,11 +211,16 @@ function guardProcess(lockFile: string, nonce: string): () => void {
 export async function withFileLock<T>(lockFile: string, fn: (lock: HeldLock) => Promise<T>): Promise<T> {
   const { nonce } = await acquire(lockFile);
   const unguard = guardProcess(lockFile, nonce);
+  const verify = async () => {
+    if (!(await owns(lockFile, nonce))) {
+      throw new Error(`Lost the lock ${lockFile} to another process`);
+    }
+  };
   const lock: HeldLock = {
-    verify: async () => {
-      if (!(await owns(lockFile, nonce))) {
-        throw new Error(`Lost the lock ${lockFile} to another process`);
-      }
+    verify,
+    touch: async () => {
+      await verify();
+      await fs.writeFile(lockFile, JSON.stringify({ nonce, pid: process.pid, time: Date.now() }));
     },
   };
   try {

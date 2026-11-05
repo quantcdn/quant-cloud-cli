@@ -17,6 +17,13 @@ export const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export const REFRESH_TIMEOUT_MS = 60_000;
 
+/**
+ * After an unknown outcome, qc waits this long and sends the same refresh token
+ * once more. The portal recovers a rotation whose answer was lost. Tests may
+ * lower it.
+ */
+export const recovery = { delayMs: 20_000 };
+
 /** After this long, qc tells the user that it is still renewing the login. */
 const SLOW_NOTICE_MS = 5_000;
 
@@ -33,6 +40,17 @@ export interface RefreshStore {
   lockFile: string;
   /** The credentials file, for messages. */
   location: string;
+}
+
+/**
+ * The portal may have rotated the tokens, but qc did not get the new pair: a
+ * timeout, a network error, a 5xx, or a 200 body that cannot be read.
+ */
+export class UnknownRefreshOutcome extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'UnknownRefreshOutcome';
+  }
 }
 
 /** The portal refused the refresh token (HTTP 400 invalid_grant or invalid_client). */
@@ -78,6 +96,9 @@ interface TokenErrorBody {
 }
 
 function refreshFailure(status: number, body: TokenErrorBody): Error {
+  if (status >= 500 || (status >= 200 && status < 300)) {
+    return new UnknownRefreshOutcome(`HTTP ${status} without a usable token response`);
+  }
   if (body.error) {
     return new TokenRefreshError(body.error, body.error_description);
   }
@@ -105,7 +126,29 @@ async function sendRefresh(auth: AuthConfig): Promise<Partial<AuthConfig>> {
   if (rejectedTokens.has(refreshToken)) {
     throw new TokenRefreshError('invalid_grant', 'Refresh token was refused earlier');
   }
-  const response = await fetch(new URL('/oauth/token', auth.host).toString(), {
+  const response = await postRefresh(auth.host, refreshToken);
+  const body = await response.json().catch(() => ({})) as Partial<LoginResponse> & TokenErrorBody;
+  if (!response.ok || typeof body.access_token !== 'string') {
+    const failure = refreshFailure(response.status, body);
+    if (failure instanceof TokenRefreshError) {
+      rejectedTokens.add(refreshToken);
+    }
+    throw failure;
+  }
+  return toAuthUpdates(body as LoginResponse);
+}
+
+/** Sends the refresh request. A timeout or network error is an unknown outcome. */
+async function postRefresh(host: string, refreshToken: string): Promise<Response> {
+  try {
+    return await sendRefreshRequest(host, refreshToken);
+  } catch (error) {
+    throw new UnknownRefreshOutcome(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function sendRefreshRequest(host: string, refreshToken: string): Promise<Response> {
+  return fetch(new URL('/oauth/token', host).toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -118,16 +161,6 @@ async function sendRefresh(auth: AuthConfig): Promise<Partial<AuthConfig>> {
     }).toString(),
     signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
   });
-
-  const body = await response.json().catch(() => ({})) as Partial<LoginResponse> & TokenErrorBody;
-  if (!response.ok || typeof body.access_token !== 'string') {
-    const failure = refreshFailure(response.status, body);
-    if (failure instanceof TokenRefreshError) {
-      rejectedTokens.add(refreshToken);
-    }
-    throw failure;
-  }
-  return toAuthUpdates(body as LoginResponse);
 }
 
 /**
@@ -146,11 +179,32 @@ async function refreshLocked(
       return latest ?? auth;
     }
     await lock.verify();
-    const updates = await requestRefresh(latest);
+    const updates = await refreshWithRecovery(latest, lock);
     await saveRotation(store, updates);
     logger.debug('Access token refreshed');
     return { ...latest, ...updates };
   });
+}
+
+/**
+ * requestRefresh, sent once more with the same refresh token after an unknown
+ * outcome. The portal answers a lost rotation with a new pair. Never more than
+ * one retry, and never after a definite 4xx answer. The lock is kept fresh,
+ * because both attempts and the wait take longer than LOCK_STALE_MS.
+ */
+async function refreshWithRecovery(auth: AuthConfig, lock: HeldLock): Promise<Partial<AuthConfig>> {
+  try {
+    return await requestRefresh(auth);
+  } catch (error) {
+    if (!(error instanceof UnknownRefreshOutcome)) {
+      throw error;
+    }
+    logger.debug(`Refresh outcome unknown (${error.message}); retrying once in ${recovery.delayMs} ms`);
+    await lock.touch();
+    await new Promise((resolve) => setTimeout(resolve, recovery.delayMs));
+    await lock.touch();
+    return requestRefresh(auth);
+  }
 }
 
 /**

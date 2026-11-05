@@ -2,7 +2,7 @@ import { describe, it, expect, jest, beforeEach, afterEach, afterAll } from '@je
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { forceRefresh, isRefreshDue, refreshIfDue, toAuthUpdates, REFRESH_WINDOW_MS } from '../../src/utils/token-refresh.js';
+import { forceRefresh, isRefreshDue, recovery, refreshIfDue, toAuthUpdates, REFRESH_WINDOW_MS } from '../../src/utils/token-refresh.js';
 import type { AuthConfig } from '../../src/types/auth.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -65,22 +65,24 @@ describe('refreshIfDue', () => {
     global.fetch = fetchMock as any;
     save.mockResolvedValue(undefined);
     reload.mockImplementation(async () => login(DAY));
+    recovery.delayMs = 5;
   });
 
   afterEach(() => {
     global.fetch = realFetch;
+    jest.restoreAllMocks();
   });
 
   it('does not call the portal when no refresh is due', async () => {
     const auth = login(30 * DAY);
-    expect(await refreshIfDue(auth, { save, reload, lockFile })).toBe(auth);
+    expect(await refreshIfDue(auth, { save, reload, lockFile, location: 'creds' })).toBe(auth);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('never refreshes a legacy login, even after a 401', async () => {
     const legacy: AuthConfig = { token: 'legacy', host: HOST };
-    expect(await refreshIfDue(legacy, { save, reload, lockFile })).toBe(legacy);
-    expect(await forceRefresh(legacy, { save, reload, lockFile })).toBeNull();
+    expect(await refreshIfDue(legacy, { save, reload, lockFile, location: 'creds' })).toBe(legacy);
+    expect(await forceRefresh(legacy, { save, reload, lockFile, location: 'creds' })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
   });
@@ -90,7 +92,7 @@ describe('refreshIfDue', () => {
       access_token: 'qc_new', refresh_token: 'qcr_new', expires_in: 90 * 86400, token_type: 'Bearer',
     }));
 
-    const result = await refreshIfDue(login(DAY), { save, reload, lockFile });
+    const result = await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
 
     expect(result.token).toBe('qc_new');
     expect(result.refreshToken).toBe('qcr_new');
@@ -106,7 +108,7 @@ describe('refreshIfDue', () => {
   it('uses the credentials another process saved, and sends no request', async () => {
     reload.mockResolvedValue(login(90 * DAY, { token: 'qc_peer', refreshToken: 'qcr_peer' }));
 
-    const result = await refreshIfDue(login(DAY), { save, reload, lockFile });
+    const result = await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
 
     expect(result.token).toBe('qc_peer');
     expect(fetchMock).not.toHaveBeenCalled();
@@ -117,7 +119,7 @@ describe('refreshIfDue', () => {
     reload.mockResolvedValue(login(60 * DAY));
     fetchMock.mockResolvedValue(jsonResponse(200, { access_token: 'qc_new', refresh_token: 'qcr_new', expires_in: 60, token_type: 'Bearer' }));
 
-    const result = await forceRefresh(login(60 * DAY), { save, reload, lockFile });
+    const result = await forceRefresh(login(60 * DAY), { save, reload, lockFile, location: 'creds' });
 
     expect(result?.token).toBe('qc_new');
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -128,7 +130,78 @@ describe('refreshIfDue', () => {
     const auth = login(DAY);
     reload.mockResolvedValue(auth);
 
-    expect(await refreshIfDue(auth, { save, reload, lockFile })).toBe(auth);
+    expect(await refreshIfDue(auth, { save, reload, lockFile, location: 'creds' })).toBe(auth);
     expect(save).not.toHaveBeenCalled();
+  });
+
+  describe('unknown outcome recovery', () => {
+    const ok = (n: string) => jsonResponse(200, { access_token: `qc_${n}`, refresh_token: `qcr_${n}`, expires_in: 60, token_type: 'Bearer' });
+    const sentTokens = () => fetchMock.mock.calls.map((c: any[]) => new URLSearchParams(c[1].body).get('refresh_token'));
+
+    it('retries once with the same refresh token after a timeout, and saves the recovered pair', async () => {
+      fetchMock
+        .mockRejectedValueOnce(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }))
+        .mockResolvedValueOnce(ok('recovered'));
+
+      const result = await refreshIfDue(login(DAY, { refreshToken: 'qcr_t1' }), { save, reload: async () => login(DAY, { refreshToken: 'qcr_t1' }), lockFile, location: 'creds' });
+
+      expect(result.token).toBe('qc_recovered');
+      expect(sentTokens()).toEqual(['qcr_t1', 'qcr_t1']);
+      expect(save).toHaveBeenCalledWith(expect.objectContaining({ token: 'qc_recovered', refreshToken: 'qcr_recovered' }));
+    });
+
+    it('retries once after a 5xx', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(503, {})).mockResolvedValueOnce(ok('after5xx'));
+
+      const result = await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
+
+      expect(result.token).toBe('qc_after5xx');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries once after an unreadable 200, and keeps the login when the retry is refused', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => { throw new Error('bad json'); } })
+        .mockResolvedValueOnce(jsonResponse(400, { error: 'invalid_grant', error_description: 'not found' }));
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const auth = login(DAY, { refreshToken: 'qcr_unreadable' });
+
+      const result = await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' });
+
+      expect(result).toBe(auth);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('never retries more than once', async () => {
+      fetchMock.mockRejectedValue(new Error('socket hang up'));
+      const auth = login(DAY, { refreshToken: 'qcr_twice' });
+
+      expect(await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' })).toBe(auth);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry after a definite 4xx', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(400, { error: 'invalid_grant' }));
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const auth = login(DAY, { refreshToken: 'qcr_definite' });
+
+      await refreshIfDue(auth, { save, reload: async () => auth, lockFile, location: 'creds' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('waits the recovery delay before the retry', async () => {
+      recovery.delayMs = 200;
+      const times: number[] = [];
+      fetchMock.mockImplementation(async () => {
+        times.push(Date.now());
+        return times.length === 1 ? jsonResponse(502, {}) : ok('late');
+      });
+
+      await refreshIfDue(login(DAY), { save, reload, lockFile, location: 'creds' });
+
+      expect(times[1] - times[0]).toBeGreaterThanOrEqual(190);
+    });
   });
 });

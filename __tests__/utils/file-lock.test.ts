@@ -87,4 +87,18 @@ describe('withFileLock', () => {
     expect(during).toBe(before + 1);
     expect(process.listenerCount('exit')).toBe(before);
   });
+
+  it('touch() writes a new timestamp, and fails when the lock was taken over', async () => {
+    const lockFile = nextLock();
+    await withFileLock(lockFile, async (lock) => {
+      const before = JSON.parse(readFileSync(lockFile, 'utf-8'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await lock.touch();
+      const after = JSON.parse(readFileSync(lockFile, 'utf-8'));
+      expect(after.nonce).toBe(before.nonce);
+      expect(after.time).toBeGreaterThan(before.time);
+      writeFileSync(lockFile, record(Date.now(), 'someone-else'));
+      await expect(lock.touch()).rejects.toThrow(/Lost the lock/);
+    });
+  });
 });
