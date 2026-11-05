@@ -1,10 +1,14 @@
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
+import { randomBytes } from 'crypto';
 import { AuthConfig, MultiPlatformConfig, PlatformInfo } from '../types/auth.js';
+import { withFileLock } from './file-lock.js';
 
 const CONFIG_DIR = process.env.QUANT_CONFIG_DIR || join(homedir(), '.quant');
 export const CONFIG_FILE = join(CONFIG_DIR, 'credentials');
+/** Every qc process holds this lock while it reads and then rewrites CONFIG_FILE. */
+export const CREDENTIALS_LOCK_FILE = `${CONFIG_FILE}.lock`;
 export const VRT_CONFIG_FILE = join(CONFIG_DIR, 'vrt-config.json');
 
 export interface VRTProjectConfig {
@@ -34,9 +38,30 @@ export async function ensureConfigDir(): Promise<void> {
   }
 }
 
-export async function saveAuthConfig(config: AuthConfig): Promise<void> {
+/**
+ * Replaces the credentials file in one step: a reader sees the old file or the
+ * new file, never a partial write. The file is readable by its owner only.
+ */
+async function writeCredentialsFile(content: string): Promise<void> {
   await ensureConfigDir();
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  const temp = join(dirname(CONFIG_FILE), `.credentials.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  try {
+    await fs.writeFile(temp, content, { encoding: 'utf-8', mode: 0o600 });
+    await fs.rename(temp, CONFIG_FILE);
+  } catch (error) {
+    await fs.unlink(temp).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Runs a read-modify-write of the credentials file under the credentials lock. */
+export async function withCredentialsLock<T>(fn: () => Promise<T>): Promise<T> {
+  await ensureConfigDir();
+  return withFileLock(CREDENTIALS_LOCK_FILE, fn);
+}
+
+export async function saveAuthConfig(config: AuthConfig): Promise<void> {
+  await writeCredentialsFile(JSON.stringify(config, null, 2));
 }
 
 export async function loadAuthConfig(): Promise<AuthConfig | null> {
@@ -76,8 +101,7 @@ export async function loadMultiPlatformConfig(): Promise<MultiPlatformConfig> {
 }
 
 export async function saveMultiPlatformConfig(config: MultiPlatformConfig): Promise<void> {
-  await ensureConfigDir();
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  await writeCredentialsFile(JSON.stringify(config, null, 2));
 }
 
 export async function getActivePlatformConfig(): Promise<AuthConfig | null> {
@@ -98,6 +122,10 @@ export async function getActivePlatformConfig(): Promise<AuthConfig | null> {
 }
 
 export async function savePlatformConfig(platformId: string, authConfig: AuthConfig, platformInfo: PlatformInfo): Promise<void> {
+  await withCredentialsLock(() => applyPlatformConfig(platformId, authConfig, platformInfo));
+}
+
+async function applyPlatformConfig(platformId: string, authConfig: AuthConfig, platformInfo: PlatformInfo): Promise<void> {
   const multiConfig = await loadMultiPlatformConfig();
   
   multiConfig.platforms[platformId] = {
@@ -114,6 +142,10 @@ export async function savePlatformConfig(platformId: string, authConfig: AuthCon
 }
 
 export async function switchPlatform(platformId: string): Promise<boolean> {
+  return withCredentialsLock(() => applySwitchPlatform(platformId));
+}
+
+async function applySwitchPlatform(platformId: string): Promise<boolean> {
   const multiConfig = await loadMultiPlatformConfig();
   
   if (!multiConfig.platforms[platformId]) {
@@ -136,6 +168,10 @@ export async function listPlatforms(): Promise<Array<{ id: string; info: Platfor
 }
 
 export async function removePlatform(platformId: string): Promise<boolean> {
+  return withCredentialsLock(() => applyRemovePlatform(platformId));
+}
+
+async function applyRemovePlatform(platformId: string): Promise<boolean> {
   const multiConfig = await loadMultiPlatformConfig();
   
   if (!multiConfig.platforms[platformId]) {
@@ -203,6 +239,11 @@ function generatePlatformInfo(host: string): PlatformInfo {
 
 // Helper to save updates to a named platform
 export async function savePlatformUpdates(platformId: string, updates: Partial<AuthConfig>): Promise<void> {
+  await withCredentialsLock(() => applyPlatformUpdates(platformId, updates));
+}
+
+/** savePlatformUpdates for a caller that already holds the credentials lock. */
+export async function applyPlatformUpdates(platformId: string, updates: Partial<AuthConfig>): Promise<void> {
   const multiConfig = await loadMultiPlatformConfig();
   const current = multiConfig.platforms[platformId];
   if (!current) {

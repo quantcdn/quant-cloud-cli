@@ -1,5 +1,6 @@
-import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
+import { resolveEffectiveContext, ContextOverrides, EffectiveContext, TokenRenewer } from './context.js';
 import { Logger } from './logger.js';
+import { createRenewingAxios } from './auth-retry.js';
 import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, CrawlersApi, CommandsApi, VariablesApi, SecretsApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
@@ -38,27 +39,31 @@ export class ApiClient {
   private defaultApplicationId?: string;
   private defaultEnvironmentId?: string;
   private token: string;
+  private renewToken?: TokenRenewer;
 
-  constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string) {
-    // Configure the APIs using Configuration object (v4.3.0)
-    // The client automatically handles Authorization header via accessToken
+  constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string, renewToken?: TokenRenewer) {
+    this.token = token;
+    this.renewToken = renewToken;
+
+    // The client reads accessToken for every request, so a renewed token is used at once.
     const config = new Configuration({
       basePath: baseUrl,
-      accessToken: token
+      accessToken: () => this.token
     });
+    // Legacy logins (no refresh token) keep the default axios and never retry.
+    const http = renewToken ? createRenewingAxios((sent) => this.renew(sent)) : undefined;
 
-    this.applicationsApi = new ApplicationsApi(config);
-    this.environmentsApi = new EnvironmentsApi(config);
-    this.sshAccessApi = new SSHAccessApi(config);
-    this.backupManagementApi = new BackupManagementApi(config);
-    this.projectsApi = new ProjectsApi(config);
-    this.crawlersApi = new CrawlersApi(config);
-    this.commandsApi = new CommandsApi(config);
-    this.variablesApi = new VariablesApi(config);
-    this.secretsApi = new SecretsApi(config);
+    this.applicationsApi = new ApplicationsApi(config, undefined, http);
+    this.environmentsApi = new EnvironmentsApi(config, undefined, http);
+    this.sshAccessApi = new SSHAccessApi(config, undefined, http);
+    this.backupManagementApi = new BackupManagementApi(config, undefined, http);
+    this.projectsApi = new ProjectsApi(config, undefined, http);
+    this.crawlersApi = new CrawlersApi(config, undefined, http);
+    this.commandsApi = new CommandsApi(config, undefined, http);
+    this.variablesApi = new VariablesApi(config, undefined, http);
+    this.secretsApi = new SecretsApi(config, undefined, http);
 
     this.baseUrl = baseUrl;
-    this.token = token;
     this.defaultOrganizationId = defaultOrganizationId;
     this.defaultApplicationId = defaultApplicationId;
     this.defaultEnvironmentId = defaultEnvironmentId;
@@ -72,8 +77,21 @@ export class ApiClient {
       context.token, 
       context.activeOrganization, 
       context.activeApplication, 
-      context.activeEnvironment
+      context.activeEnvironment,
+      context.renewToken
     );
+  }
+
+  /** Renews the token after a 401 for sentToken. Returns the new token, or null. */
+  private async renew(sentToken: string): Promise<string | null> {
+    if (!this.renewToken) {
+      return null;
+    }
+    const token = await this.renewToken(sentToken);
+    if (token) {
+      this.token = token;
+    }
+    return token;
   }
 
   // Old request method removed - now using TypeScript client
@@ -142,16 +160,31 @@ export class ApiClient {
     throw new Error('getOrganizations not yet implemented - use getUserInfo instead');
   }
 
+  private fetchUserInfo(token: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/oauth/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+  }
+
+  /** fetchUserInfo, renewed and sent again once after a 401. */
+  private async fetchUserInfoWithRenewal(): Promise<Response> {
+    const sent = this.token;
+    const response = await this.fetchUserInfo(sent);
+    if (response.status !== 401) {
+      return response;
+    }
+    const token = await this.renew(sent);
+    return token ? this.fetchUserInfo(token) : response;
+  }
+
   async getUserInfo(): Promise<any> {
     // OAuth user info is fetched directly, not through the TypeScript client
     // This endpoint is not part of the v3 API, it's part of the OAuth system
     try {
-      const response = await fetch(`${this.baseUrl}/api/oauth/user`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Accept': 'application/json'
-        }
-      });
+      const response = await this.fetchUserInfoWithRenewal();
 
       if (!response.ok) {
         if (response.status === 401) {
