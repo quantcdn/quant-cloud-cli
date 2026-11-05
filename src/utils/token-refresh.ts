@@ -1,5 +1,5 @@
 import type { AuthConfig, LoginResponse } from '../types/auth.js';
-import { withFileLock } from './file-lock.js';
+import { HeldLock, withFileLock } from './file-lock.js';
 import { Logger } from './logger.js';
 
 const logger = new Logger('Auth');
@@ -10,10 +10,15 @@ const CLIENT_ID = 'quant-cli';
 export const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * The refresh request must end well before LOCK_STALE_MS, or a waiting process
- * takes the lock and sends the same refresh token, which revokes the chain.
+ * The portal can stall for a long time, and it commits a rotation even when the
+ * client has gone, so qc waits long for the answer. The timeout must stay below
+ * LOCK_STALE_MS, or a waiting process takes the lock and sends the same refresh
+ * token, which revokes the chain.
  */
-const REFRESH_TIMEOUT_MS = 15_000;
+export const REFRESH_TIMEOUT_MS = 60_000;
+
+/** After this long, qc tells the user that it is still renewing the login. */
+const SLOW_NOTICE_MS = 5_000;
 
 /** Refresh tokens the portal refused in this process. They are not sent again. */
 const rejectedTokens = new Set<string>();
@@ -26,6 +31,8 @@ export interface RefreshStore {
   reload(): Promise<AuthConfig | null>;
   /** The lock file that every qc process holds while it refreshes or saves. */
   lockFile: string;
+  /** The credentials file, for messages. */
+  location: string;
 }
 
 /** The portal refused the refresh token (HTTP 400 invalid_grant or invalid_client). */
@@ -77,7 +84,23 @@ function refreshFailure(status: number, body: TokenErrorBody): Error {
   return new Error(`HTTP ${status}`);
 }
 
+/** Prints a note on stderr when the refresh takes longer than SLOW_NOTICE_MS. Returns a function that cancels it. */
+function noticeIfSlow(): () => void {
+  const timer = setTimeout(() => process.stderr.write('Renewing Quant login…\n'), SLOW_NOTICE_MS);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
+
 async function requestRefresh(auth: AuthConfig): Promise<Partial<AuthConfig>> {
+  const cancelNotice = noticeIfSlow();
+  try {
+    return await sendRefresh(auth);
+  } finally {
+    cancelNotice();
+  }
+}
+
+async function sendRefresh(auth: AuthConfig): Promise<Partial<AuthConfig>> {
   const refreshToken = auth.refreshToken as string;
   if (rejectedTokens.has(refreshToken)) {
     throw new TokenRefreshError('invalid_grant', 'Refresh token was refused earlier');
@@ -117,16 +140,34 @@ async function refreshLocked(
   store: RefreshStore,
   shouldRefresh: (latest: AuthConfig) => boolean,
 ): Promise<AuthConfig> {
-  return withFileLock(store.lockFile, async () => {
+  return withFileLock(store.lockFile, async (lock: HeldLock) => {
     const latest = await store.reload();
     if (!latest || latest.token !== auth.token || !shouldRefresh(latest)) {
       return latest ?? auth;
     }
+    await lock.verify();
     const updates = await requestRefresh(latest);
-    await store.save(updates);
+    await saveRotation(store, updates);
     logger.debug('Access token refreshed');
     return { ...latest, ...updates };
   });
+}
+
+/**
+ * Saves a rotated pair, with one retry. The portal has already rotated, so the
+ * new pair is used for this command even when it cannot be saved.
+ */
+async function saveRotation(store: RefreshStore, updates: Partial<AuthConfig>): Promise<void> {
+  try {
+    await store.save(updates);
+  } catch {
+    try {
+      await store.save(updates);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`Could not save the refreshed login to ${store.location} (${reason}): run \`qc login\` if later commands fail.`);
+    }
+  }
 }
 
 let warnedRejected = false;

@@ -1,8 +1,8 @@
-import { applyPlatformUpdates, CREDENTIALS_LOCK_FILE, loadMultiPlatformConfig, saveActivePlatformConfig, savePlatformUpdates } from './config.js';
+import { applyPlatformUpdates, CONFIG_FILE, CREDENTIALS_LOCK_FILE, loadCredentialsLocked, loadMultiPlatformConfig, saveActivePlatformConfig, savePlatformUpdates } from './config.js';
 import type { AuthConfig } from '../types/auth.js';
 import { getProjectConfig, ProjectConfig } from './project-config.js';
 import { Logger } from './logger.js';
-import { forceRefresh, refreshIfDue, RefreshStore } from './token-refresh.js';
+import { forceRefresh, isRefreshDue, refreshIfDue, RefreshStore } from './token-refresh.js';
 
 const logger = new Logger('Context');
 
@@ -33,8 +33,8 @@ export interface EffectiveContext {
 export type TokenRenewer = (sentToken: string) => Promise<string | null>;
 
 /** The stored login for a platform, or null when there is none. */
-async function loadStoredAuth(platformId: string): Promise<AuthConfig | null> {
-  const multiConfig = await loadMultiPlatformConfig();
+async function loadStoredAuth(platformId: string, load = loadMultiPlatformConfig): Promise<AuthConfig | null> {
+  const multiConfig = await load();
   const stored = multiConfig.platforms[platformId];
   if (!stored) {
     return null;
@@ -60,10 +60,34 @@ async function loadPlatformAuth(platformId: string): Promise<AuthConfig> {
  */
 export function platformRefreshStore(platformId: string): RefreshStore {
   return {
-    reload: () => loadStoredAuth(platformId),
+    // Called under the lock: a file that cannot be read throws instead of looking empty.
+    reload: () => loadStoredAuth(platformId, loadCredentialsLocked),
     save: (updates) => applyPlatformUpdates(platformId, updates),
     lockFile: CREDENTIALS_LOCK_FILE,
+    location: CONFIG_FILE,
   };
+}
+
+/** The proactive refresh of each platform in this process, keyed by platform id. */
+const refreshes = new Map<string, { from: string; result: Promise<AuthConfig> }>();
+
+/**
+ * refreshIfDue, at most once for each platform in this process. A second call
+ * for the same stored token (for example when the save failed) gets the first
+ * result, so this process never sends the same refresh token twice.
+ */
+async function refreshOncePerProcess(platformId: string, auth: AuthConfig): Promise<AuthConfig> {
+  const earlier = refreshes.get(platformId);
+  if (earlier && earlier.from === auth.token) {
+    const { token, refreshToken, expiresAt } = await earlier.result;
+    return { ...auth, token, refreshToken, expiresAt };
+  }
+  if (!isRefreshDue(auth)) {
+    return auth;
+  }
+  const result = refreshIfDue(auth, platformRefreshStore(platformId));
+  refreshes.set(platformId, { from: auth.token, result });
+  return result;
 }
 
 /** A TokenRenewer for this login, or undefined for a legacy login without a refresh token. */
@@ -125,7 +149,7 @@ async function loadEffectiveAuth(platformFlag?: string): Promise<{ platformId: s
   if (!auth) {
     return null;
   }
-  return { platformId, auth: await refreshIfDue(auth, platformRefreshStore(platformId)) };
+  return { platformId, auth: await refreshOncePerProcess(platformId, auth) };
 }
 
 /**

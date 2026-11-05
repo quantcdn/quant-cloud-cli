@@ -9,9 +9,13 @@ function sentToken(config: RetryConfig): string {
   return String(config.headers?.Authorization ?? '').replace(/^Bearer\s+/i, '');
 }
 
-async function retryAfterRenewal(http: AxiosInstance, renew: Renew, error: AxiosError): Promise<unknown> {
+async function retryAfterRenewal(http: AxiosInstance, renew: Renew, onRejected: () => void, error: AxiosError): Promise<unknown> {
   const config = error?.config as RetryConfig | undefined;
-  if (error?.response?.status !== 401 || !config || config._qcRenewed) {
+  if (error?.response?.status !== 401 || !config) {
+    throw error;
+  }
+  if (config._qcRenewed) {
+    onRejected();
     throw error;
   }
   config._qcRenewed = true;
@@ -25,10 +29,11 @@ async function retryAfterRenewal(http: AxiosInstance, renew: Renew, error: Axios
 
 /**
  * An axios instance for the quant-client APIs. After a 401 it renews the token
- * once and sends the same request again. A second 401 goes to the caller.
+ * once and sends the same request again. A second 401 goes to the caller, and
+ * onRejected is called: the renewed token was refused too.
  */
-export function createRenewingAxios(renew: Renew): AxiosInstance {
+export function createRenewingAxios(renew: Renew, onRejected: () => void): AxiosInstance {
   const http = axios.create();
-  http.interceptors.response.use(undefined, (error) => retryAfterRenewal(http, renew, error));
+  http.interceptors.response.use(undefined, (error) => retryAfterRenewal(http, renew, onRejected, error));
   return http;
 }

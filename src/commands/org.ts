@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { createSpinner } from '../utils/spinner.js';
 import { getEffectiveAuth, saveEffectiveConfig } from '../utils/context.js';
+import { ApiClient } from '../utils/api.js';
 import { UserInfo } from '../types/auth.js';
 import { Logger } from '../utils/logger.js';
 
@@ -45,24 +46,14 @@ async function handleOrgList() {
     
     let userInfo: UserInfo;
     try {
-      const response = await fetch(`${auth.host}/api/oauth/user`, {
-        headers: {
-          'Authorization': `Bearer ${auth.token}`,
-          'Accept': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        spinner.fail('Failed to fetch organization data');
-        logger.error('Failed to fetch organization data. Please re-authenticate with `quant-cloud login`.');
-        return;
-      }
-
-      userInfo = await response.json() as UserInfo;
+      // ApiClient renews the login once after a 401.
+      const client = await ApiClient.create();
+      userInfo = await client.getUserInfo() as UserInfo;
       spinner.succeed('Loaded organizations');
     } catch (error) {
-      spinner.fail('Failed to load organizations');
-      throw error;
+      spinner.fail('Failed to fetch organization data');
+      logger.error(error instanceof Error ? error.message : String(error));
+      return;
     }
     
     if (!userInfo.organizations || userInfo.organizations.length === 0) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach, afterAll } from '@jest/globals';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, promises as fsp } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createRequire } from 'module';
@@ -194,6 +194,19 @@ describe('401 retry', () => {
     expect(tokenCalls()).toHaveLength(1);
   });
 
+  it('stops renewing in a client after the renewed token is refused too', async () => {
+    writeLogin({ token: 'qc_old8', refreshToken: 'qcr_old8', expiresAt: notDue() });
+    fetchMock.mockResolvedValue(rotated(8));
+    const sent = fakeApi(() => 401);
+
+    const client = await ApiClient.create();
+    await expect(client.getApplications()).rejects.toThrow(/Authentication expired/);
+    await expect(client.getApplications()).rejects.toThrow(/Authentication expired/);
+
+    expect(sent).toEqual(['qc_old8', 'qc_new8', 'qc_new8']);
+    expect(tokenCalls()).toHaveLength(1);
+  });
+
   it('refreshes once and repeats the /api/oauth/user request once', async () => {
     writeLogin({ token: 'qc_old6', refreshToken: 'qcr_old6', expiresAt: notDue() });
     fetchMock.mockImplementation(async (url: any, init: any) => {
@@ -208,6 +221,27 @@ describe('401 retry', () => {
     expect(await client.getUserInfo()).toEqual({ email: 'a@b.c' });
     expect(tokenCalls()).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('save failure after a rotation', () => {
+  it('uses the new pair, refreshes once in this process, and reports the path', async () => {
+    writeLogin({ token: 'qc_old9', refreshToken: 'qcr_old9', expiresAt: new Date(Date.now() + DAY).toISOString() });
+    fetchMock.mockResolvedValue(rotated(9));
+    const write = jest.spyOn(fsp, 'writeFile').mockRejectedValue(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const first = await ctx.getEffectiveAuth();
+    const second = await ctx.getEffectiveAuth();
+
+    expect(first?.token).toBe('qc_new9');
+    expect(second?.token).toBe('qc_new9');
+    expect(tokenCalls()).toHaveLength(1);
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain(`Could not save the refreshed login to ${credFile}`);
+    expect(String(error.mock.calls[0][0])).toContain('qc login');
+    expect(stored().token).toBe('qc_old9');
   });
 });
 

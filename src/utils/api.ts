@@ -40,6 +40,8 @@ export class ApiClient {
   private defaultEnvironmentId?: string;
   private token: string;
   private renewToken?: TokenRenewer;
+  /** Set when a renewed token was refused too. Then this client stops renewing. */
+  private renewalRejected = false;
 
   constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string, renewToken?: TokenRenewer) {
     this.token = token;
@@ -51,7 +53,9 @@ export class ApiClient {
       accessToken: () => this.token
     });
     // Legacy logins (no refresh token) keep the default axios and never retry.
-    const http = renewToken ? createRenewingAxios((sent) => this.renew(sent)) : undefined;
+    const http = renewToken
+      ? createRenewingAxios((sent) => this.renew(sent), () => { this.renewalRejected = true; })
+      : undefined;
 
     this.applicationsApi = new ApplicationsApi(config, undefined, http);
     this.environmentsApi = new EnvironmentsApi(config, undefined, http);
@@ -84,7 +88,7 @@ export class ApiClient {
 
   /** Renews the token after a 401 for sentToken. Returns the new token, or null. */
   private async renew(sentToken: string): Promise<string | null> {
-    if (!this.renewToken) {
+    if (!this.renewToken || this.renewalRejected) {
       return null;
     }
     const token = await this.renewToken(sentToken);
@@ -177,7 +181,12 @@ export class ApiClient {
       return response;
     }
     const token = await this.renew(sent);
-    return token ? this.fetchUserInfo(token) : response;
+    if (!token) {
+      return response;
+    }
+    const retried = await this.fetchUserInfo(token);
+    this.renewalRejected = retried.status === 401;
+    return retried;
   }
 
   async getUserInfo(): Promise<any> {
