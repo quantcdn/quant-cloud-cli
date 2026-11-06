@@ -216,6 +216,7 @@ async function prepareRetry(
   lastError: unknown,
 ): Promise<Partial<AuthConfig> | null> {
   await lock.touch();
+  process.stderr.write(`Renewing Quant login: no clear answer from the server. Trying again in ${Math.round(recovery.delayMs / 1000)} s…\n`);
   await sleep(recovery.delayMs);
   await lock.touch();
   if (Date.now() - firstSend > recovery.windowMs) {
