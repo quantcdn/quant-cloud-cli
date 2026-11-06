@@ -1,6 +1,6 @@
 {
   "name": "@quantcdn/quant-cloud-cli",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Command-line interface for Quant Cloud Platform integration and management",
   "type": "module",
   "main": "dist/index.js",
@@ -95,7 +95,7 @@
     "picomatch": "^4.0.4"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
   "files": [
     "dist/**/*",

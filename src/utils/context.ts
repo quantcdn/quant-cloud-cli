@@ -1,7 +1,8 @@
-import { getActivePlatformConfig, loadMultiPlatformConfig, saveActivePlatformConfig, savePlatformUpdates } from './config.js';
+import { applyPlatformUpdates, CONFIG_FILE, CREDENTIALS_LOCK_FILE, loadCredentialsLocked, loadMultiPlatformConfig, saveActivePlatformConfig, savePlatformUpdates } from './config.js';
 import type { AuthConfig } from '../types/auth.js';
 import { getProjectConfig, ProjectConfig } from './project-config.js';
 import { Logger } from './logger.js';
+import { forceRefresh, isRefreshDue, refreshIfDue, RefreshStore } from './token-refresh.js';
 
 const logger = new Logger('Context');
 
@@ -21,19 +22,84 @@ export interface EffectiveContext {
   activeApplication?: string;
   activeEnvironment?: string;
   organizations?: any[];
+  /** Present only for logins with a refresh token. See tokenRenewer(). */
+  renewToken?: TokenRenewer;
+}
+
+/**
+ * Called after the portal answers 401 for sentToken. Returns a new access token,
+ * or null when the login cannot be renewed.
+ */
+export type TokenRenewer = (sentToken: string) => Promise<string | null>;
+
+/** The stored login for a platform, or null when there is none. */
+async function loadStoredAuth(platformId: string, load = loadMultiPlatformConfig): Promise<AuthConfig | null> {
+  const multiConfig = await load();
+  const stored = multiConfig.platforms[platformId];
+  if (!stored) {
+    return null;
+  }
+  const { platformInfo, ...auth } = stored;
+  return auth;
 }
 
 /**
  * Loads the stored credentials for a named platform without changing the persisted active platform.
  */
 async function loadPlatformAuth(platformId: string): Promise<AuthConfig> {
-  const multiConfig = await loadMultiPlatformConfig();
-  const stored = multiConfig.platforms[platformId];
-  if (!stored || !stored.token) {
+  const auth = await loadStoredAuth(platformId);
+  if (!auth || !auth.token) {
     throw new Error(`Not logged in to platform ${platformId}. Run qc login and choose ${platformId}, or qc platform list.`);
   }
-  const { platformInfo, ...auth } = stored;
   return auth;
+}
+
+/**
+ * The refresh store for one platform. It is bound to the platform id, so a
+ * refresh never writes to another platform, even if the active one changes.
+ */
+export function platformRefreshStore(platformId: string): RefreshStore {
+  return {
+    // Called under the lock: a file that cannot be read throws instead of looking empty.
+    reload: () => loadStoredAuth(platformId, loadCredentialsLocked),
+    save: (updates) => applyPlatformUpdates(platformId, updates),
+    lockFile: CREDENTIALS_LOCK_FILE,
+    location: CONFIG_FILE,
+  };
+}
+
+/** The proactive refresh of each platform in this process, keyed by platform id. */
+const refreshes = new Map<string, { from: string; result: Promise<AuthConfig> }>();
+
+/**
+ * refreshIfDue, at most once for each platform in this process. A second call
+ * for the same stored token (for example when the save failed) gets the first
+ * result, so this process never sends the same refresh token twice.
+ */
+async function refreshOncePerProcess(platformId: string, auth: AuthConfig): Promise<AuthConfig> {
+  const earlier = refreshes.get(platformId);
+  if (earlier && earlier.from === auth.token) {
+    const { token, refreshToken, expiresAt } = await earlier.result;
+    return { ...auth, token, refreshToken, expiresAt };
+  }
+  if (!isRefreshDue(auth)) {
+    return auth;
+  }
+  const result = refreshIfDue(auth, platformRefreshStore(platformId));
+  refreshes.set(platformId, { from: auth.token, result });
+  return result;
+}
+
+/** A TokenRenewer for this login, or undefined for a legacy login without a refresh token. */
+export function tokenRenewer(auth: AuthConfig, platformId: string): TokenRenewer | undefined {
+  if (!auth.refreshToken) {
+    return undefined;
+  }
+  const store = platformRefreshStore(platformId);
+  return async (sentToken) => {
+    const renewed = await forceRefresh({ ...auth, token: sentToken }, store);
+    return renewed?.token ?? null;
+  };
 }
 
 function describe(values: Record<string, string | undefined>): string {
@@ -68,8 +134,22 @@ export function requestedPlatform(flag?: string): string | undefined {
  * token and stored org/app context always come from the same platform.
  */
 export async function getEffectiveAuth(platformFlag?: string): Promise<AuthConfig | null> {
-  const id = requestedPlatform(platformFlag);
-  return id ? loadPlatformAuth(id) : getActivePlatformConfig();
+  const effective = await loadEffectiveAuth(platformFlag);
+  return effective ? effective.auth : null;
+}
+
+/** getEffectiveAuth, plus the id of the platform the login came from. */
+async function loadEffectiveAuth(platformFlag?: string): Promise<{ platformId: string; auth: AuthConfig } | null> {
+  const requested = requestedPlatform(platformFlag);
+  const platformId = requested || (await loadMultiPlatformConfig()).activePlatform;
+  if (!platformId) {
+    return null;
+  }
+  const auth = requested ? await loadPlatformAuth(platformId) : await loadStoredAuth(platformId);
+  if (!auth) {
+    return null;
+  }
+  return { platformId, auth: await refreshOncePerProcess(platformId, auth) };
 }
 
 /**
@@ -93,10 +173,11 @@ export async function resolveEffectiveContext(overrides: ContextOverrides = {}):
   const projectConfig = getProjectConfig();
 
   // Platform priority: CLI flag > .quant.yml > active platform. Never persisted.
-  const auth = await getEffectiveAuth(overrides.platform);
-  if (!auth || !auth.token) {
+  const effective = await loadEffectiveAuth(overrides.platform);
+  if (!effective || !effective.auth.token) {
     throw new Error('Not authenticated. Run `quant-cloud login` to authenticate.');
   }
+  const { auth, platformId } = effective;
 
   // Apply in priority order: CLI flags > project config > stored config
   const effectiveContext: EffectiveContext = {
@@ -108,6 +189,7 @@ export async function resolveEffectiveContext(overrides: ContextOverrides = {}):
     activeOrganization: overrides.org || projectConfig.org || auth.activeOrganization,
     activeApplication: overrides.app || projectConfig.app || auth.activeApplication,
     activeEnvironment: overrides.env || projectConfig.env || auth.activeEnvironment,
+    renewToken: tokenRenewer(auth, platformId),
   };
 
   logContextSources(overrides, projectConfig, effectiveContext);

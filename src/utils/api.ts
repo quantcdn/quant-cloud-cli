@@ -1,5 +1,6 @@
-import { resolveEffectiveContext, ContextOverrides, EffectiveContext } from './context.js';
+import { resolveEffectiveContext, ContextOverrides, EffectiveContext, TokenRenewer } from './context.js';
 import { Logger } from './logger.js';
+import { createRenewingAxios } from './auth-retry.js';
 import { ApplicationsApi, EnvironmentsApi, SSHAccessApi, BackupManagementApi, ProjectsApi, CrawlersApi, CommandsApi, VariablesApi, SecretsApi, Configuration } from '@quantcdn/quant-client';
 
 const logger = new Logger('API');
@@ -8,6 +9,19 @@ export interface ApiOptions {
   organizationId?: string;
   applicationId?: string;
   environmentId?: string;
+}
+
+/** The HTTP status of an SDK error: axios sets response.status, older clients set statusCode. */
+function httpStatus(error: any): number | undefined {
+  return error?.statusCode ?? error?.response?.status;
+}
+
+function environmentsNotFoundMessage(error: { body?: { message?: string } }, organizationId: string, applicationId: string): string {
+  const message: string = error.body?.message ?? '';
+  if (message.includes('Application') && message.includes('not found')) {
+    return `Application '${organizationId}/${applicationId}' not found.`;
+  }
+  return `Organization '${organizationId}' not found or no access to environments.`;
 }
 
 export class ApiClient {
@@ -25,27 +39,35 @@ export class ApiClient {
   private defaultApplicationId?: string;
   private defaultEnvironmentId?: string;
   private token: string;
+  private renewToken?: TokenRenewer;
+  /** Set when a renewed token was refused too. Then this client stops renewing. */
+  private renewalRejected = false;
 
-  constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string) {
-    // Configure the APIs using Configuration object (v4.3.0)
-    // The client automatically handles Authorization header via accessToken
+  constructor(baseUrl: string, token: string, defaultOrganizationId?: string, defaultApplicationId?: string, defaultEnvironmentId?: string, renewToken?: TokenRenewer) {
+    this.token = token;
+    this.renewToken = renewToken;
+
+    // The client reads accessToken for every request, so a renewed token is used at once.
     const config = new Configuration({
       basePath: baseUrl,
-      accessToken: token
+      accessToken: () => this.token
     });
+    // Legacy logins (no refresh token) keep the default axios and never retry.
+    const http = renewToken
+      ? createRenewingAxios((sent) => this.renew(sent), () => { this.renewalRejected = true; })
+      : undefined;
 
-    this.applicationsApi = new ApplicationsApi(config);
-    this.environmentsApi = new EnvironmentsApi(config);
-    this.sshAccessApi = new SSHAccessApi(config);
-    this.backupManagementApi = new BackupManagementApi(config);
-    this.projectsApi = new ProjectsApi(config);
-    this.crawlersApi = new CrawlersApi(config);
-    this.commandsApi = new CommandsApi(config);
-    this.variablesApi = new VariablesApi(config);
-    this.secretsApi = new SecretsApi(config);
+    this.applicationsApi = new ApplicationsApi(config, undefined, http);
+    this.environmentsApi = new EnvironmentsApi(config, undefined, http);
+    this.sshAccessApi = new SSHAccessApi(config, undefined, http);
+    this.backupManagementApi = new BackupManagementApi(config, undefined, http);
+    this.projectsApi = new ProjectsApi(config, undefined, http);
+    this.crawlersApi = new CrawlersApi(config, undefined, http);
+    this.commandsApi = new CommandsApi(config, undefined, http);
+    this.variablesApi = new VariablesApi(config, undefined, http);
+    this.secretsApi = new SecretsApi(config, undefined, http);
 
     this.baseUrl = baseUrl;
-    this.token = token;
     this.defaultOrganizationId = defaultOrganizationId;
     this.defaultApplicationId = defaultApplicationId;
     this.defaultEnvironmentId = defaultEnvironmentId;
@@ -59,8 +81,21 @@ export class ApiClient {
       context.token, 
       context.activeOrganization, 
       context.activeApplication, 
-      context.activeEnvironment
+      context.activeEnvironment,
+      context.renewToken
     );
+  }
+
+  /** Renews the token after a 401 for sentToken. Returns the new token, or null. */
+  private async renew(sentToken: string): Promise<string | null> {
+    if (!this.renewToken || this.renewalRejected) {
+      return null;
+    }
+    const token = await this.renewToken(sentToken);
+    if (token) {
+      this.token = token;
+    }
+    return token;
   }
 
   // Old request method removed - now using TypeScript client
@@ -80,12 +115,13 @@ export class ApiClient {
       const response = await this.applicationsApi.listApplications(organizationId);
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
+      if (status === 404) {
         throw new Error(`Organization '${organizationId}' not found or no access to applications.`);
-      } else if (error.statusCode === 403) {
+      } else if (status === 403) {
         throw new Error(`Access denied to applications in organization '${organizationId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch applications: ${error.message || 'Network error'}`);
@@ -109,16 +145,13 @@ export class ApiClient {
       const response = await this.environmentsApi.listEnvironments(organizationId, applicationId);
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
-        if (error.body?.message?.includes('Application') && error.body?.message?.includes('not found')) {
-          throw new Error(`Application '${organizationId}/${applicationId}' not found.`);
-        } else {
-          throw new Error(`Organization '${organizationId}' not found or no access to environments.`);
-        }
-      } else if (error.statusCode === 403) {
+      if (status === 404) {
+        throw new Error(environmentsNotFoundMessage(error, organizationId, applicationId));
+      } else if (status === 403) {
         throw new Error(`Access denied to environments in '${organizationId}/${applicationId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch environments: ${error.message || 'Network error'}`);
@@ -131,16 +164,36 @@ export class ApiClient {
     throw new Error('getOrganizations not yet implemented - use getUserInfo instead');
   }
 
+  private fetchUserInfo(token: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/oauth/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+  }
+
+  /** fetchUserInfo, renewed and sent again once after a 401. */
+  private async fetchUserInfoWithRenewal(): Promise<Response> {
+    const sent = this.token;
+    const response = await this.fetchUserInfo(sent);
+    if (response.status !== 401) {
+      return response;
+    }
+    const token = await this.renew(sent);
+    if (!token) {
+      return response;
+    }
+    const retried = await this.fetchUserInfo(token);
+    this.renewalRejected = retried.status === 401;
+    return retried;
+  }
+
   async getUserInfo(): Promise<any> {
     // OAuth user info is fetched directly, not through the TypeScript client
     // This endpoint is not part of the v3 API, it's part of the OAuth system
     try {
-      const response = await fetch(`${this.baseUrl}/api/oauth/user`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Accept': 'application/json'
-        }
-      });
+      const response = await this.fetchUserInfoWithRenewal();
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -179,12 +232,13 @@ export class ApiClient {
       );
       return response.data;
     } catch (error: any) {
+      const status = httpStatus(error);
       // Provide friendly error messages instead of debug dumps
-      if (error.statusCode === 404) {
+      if (status === 404) {
         throw new Error(`Environment '${organizationId}/${applicationId}/${options.environmentId}' not found or metrics unavailable.`);
-      } else if (error.statusCode === 403) {
+      } else if (status === 403) {
         throw new Error(`Access denied to metrics for '${organizationId}/${applicationId}/${options.environmentId}'.`);
-      } else if (error.statusCode === 401) {
+      } else if (status === 401) {
         throw new Error('Authentication expired. Please run `qc login` to re-authenticate.');
       } else {
         throw new Error(`Failed to fetch metrics: ${error.message || 'Network error'}`);

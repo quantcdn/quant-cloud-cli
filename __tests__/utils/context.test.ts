@@ -9,6 +9,10 @@ jest.unstable_mockModule('../../src/utils/config.js', () => ({
   loadMultiPlatformConfig: mockLoadMulti,
   saveActivePlatformConfig: mockSaveActive,
   savePlatformUpdates: mockSaveNamed,
+  applyPlatformUpdates: mockSaveNamed,
+  CREDENTIALS_LOCK_FILE: '/nonexistent/credentials.lock',
+  CONFIG_FILE: '/nonexistent/credentials',
+  loadCredentialsLocked: mockLoadMulti,
   getActivePlatformConfig: async () => {
     const m = await mockLoadMulti();
     const { platformInfo, ...auth } = m.platforms[m.activePlatform];

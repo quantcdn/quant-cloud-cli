@@ -374,9 +374,8 @@ async function exchangeCodeForToken(code: string, codeVerifier: string, host: st
     code_verifier: codeVerifier,
   });
   
-  logger.debug('Token request details:');
-  logger.debug(`  URL: ${tokenUrl.toString()}`);
-  logger.debug(`  Body: ${body.toString()}`);
+  // Do not log the body: it holds the authorization code and the PKCE verifier.
+  logger.debug(`Token request: ${tokenUrl.toString()}`);
   
   const response = await fetch(tokenUrl.toString(), {
     method: 'POST',

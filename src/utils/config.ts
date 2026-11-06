@@ -1,10 +1,14 @@
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
+import { randomBytes } from 'crypto';
 import { AuthConfig, MultiPlatformConfig, PlatformInfo } from '../types/auth.js';
+import { withFileLock } from './file-lock.js';
 
 const CONFIG_DIR = process.env.QUANT_CONFIG_DIR || join(homedir(), '.quant');
 export const CONFIG_FILE = join(CONFIG_DIR, 'credentials');
+/** Every qc process holds this lock while it reads and then rewrites CONFIG_FILE. */
+export const CREDENTIALS_LOCK_FILE = `${CONFIG_FILE}.lock`;
 export const VRT_CONFIG_FILE = join(CONFIG_DIR, 'vrt-config.json');
 
 export interface VRTProjectConfig {
@@ -34,9 +38,93 @@ export async function ensureConfigDir(): Promise<void> {
   }
 }
 
-export async function saveAuthConfig(config: AuthConfig): Promise<void> {
+/** Rename errors that a retry or an in-place write can get past. */
+const RENAME_FALLBACK_CODES = new Set(['EBUSY', 'EXDEV', 'EPERM', 'EACCES']);
+const RENAME_BACKOFF_MS = [50, 150, 400];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException)?.code;
+}
+
+/** The real file behind CONFIG_FILE, so a symlinked file stays a symlink. */
+async function credentialsTarget(): Promise<string> {
+  try {
+    return await fs.realpath(CONFIG_FILE);
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return CONFIG_FILE;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Renames temp over target. Retries EBUSY, EXDEV, EPERM and EACCES with a short
+ * backoff (antivirus, open handles on Windows). Returns false when the rename
+ * still fails with one of those codes; throws any other error.
+ */
+async function renameWithRetry(temp: string, target: string): Promise<boolean> {
+  for (const delay of [...RENAME_BACKOFF_MS, -1]) {
+    try {
+      await fs.rename(temp, target);
+      return true;
+    } catch (error) {
+      if (!RENAME_FALLBACK_CODES.has(errorCode(error) ?? '')) {
+        throw error;
+      }
+      if (delay >= 0) {
+        await sleep(delay);
+      }
+    }
+  }
+  return false;
+}
+
+/** Writes temp in the target's directory and renames it. Returns false if the rename cannot replace the target. */
+async function replaceByRename(target: string, content: string): Promise<boolean> {
+  const temp = join(dirname(target), `.credentials.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  try {
+    await fs.writeFile(temp, content, { encoding: 'utf-8', mode: 0o600 });
+    if (await renameWithRetry(temp, target)) {
+      return true;
+    }
+  } catch (error) {
+    await fs.unlink(temp).catch(() => undefined);
+    if (RENAME_FALLBACK_CODES.has(errorCode(error) ?? '')) {
+      return false;
+    }
+    throw error;
+  }
+  await fs.unlink(temp).catch(() => undefined);
+  return false;
+}
+
+/**
+ * Replaces the credentials file, readable by its owner only. Normally this is a
+ * rename, so a reader sees the old file or the new file. When the rename cannot
+ * replace the file (a single-file bind mount gives EBUSY), the file is written
+ * in place; callers hold the credentials lock, so no qc process reads it then.
+ */
+async function writeCredentialsFile(content: string): Promise<void> {
   await ensureConfigDir();
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  const target = await credentialsTarget();
+  if (await replaceByRename(target, content)) {
+    return;
+  }
+  await fs.writeFile(target, content, { encoding: 'utf-8', mode: 0o600 });
+  await fs.chmod(target, 0o600).catch(() => undefined);
+}
+
+/** Runs a read-modify-write of the credentials file under the credentials lock. */
+export async function withCredentialsLock<T>(fn: () => Promise<T>): Promise<T> {
+  await ensureConfigDir();
+  return withFileLock(CREDENTIALS_LOCK_FILE, fn);
+}
+
+export async function saveAuthConfig(config: AuthConfig): Promise<void> {
+  await writeCredentialsFile(JSON.stringify(config, null, 2));
 }
 
 export async function loadAuthConfig(): Promise<AuthConfig | null> {
@@ -48,36 +136,71 @@ export async function loadAuthConfig(): Promise<AuthConfig | null> {
   }
 }
 
+/** Deletes the credentials file under the credentials lock (qc logout). */
 export async function clearAuthConfig(): Promise<void> {
+  await withCredentialsLock(async () => {
+    try {
+      await fs.unlink(CONFIG_FILE);
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') {
+        throw error;
+      }
+    }
+  });
+}
+
+/** The parsed credentials file, or null when it does not exist. Other errors are thrown. */
+async function readCredentialsFile(): Promise<MultiPlatformConfig | AuthConfig | null> {
   try {
-    await fs.unlink(CONFIG_FILE);
-  } catch {
-    // File doesn't exist, which is fine
+    return JSON.parse(await fs.readFile(CONFIG_FILE, 'utf-8'));
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return null;
+    }
+    throw error;
   }
 }
 
-// Multi-platform configuration management
+function isMultiPlatform(parsed: MultiPlatformConfig | AuthConfig): parsed is MultiPlatformConfig {
+  return Boolean((parsed as MultiPlatformConfig).platforms);
+}
+
+/**
+ * Reads the credentials for a caller that holds the credentials lock and saves
+ * afterwards. A file that cannot be read or parsed throws: an empty result here
+ * would make the next save drop every platform. An old single-platform file is
+ * migrated and saved.
+ */
+export async function loadCredentialsLocked(): Promise<MultiPlatformConfig> {
+  const parsed = await readCredentialsFile();
+  if (!parsed) {
+    return { platforms: {} };
+  }
+  if (isMultiPlatform(parsed)) {
+    return parsed;
+  }
+  return migrateSinglePlatformConfig(parsed);
+}
+
+// Multi-platform configuration management. Read-only callers get an empty
+// config when the file is missing or cannot be read.
 export async function loadMultiPlatformConfig(): Promise<MultiPlatformConfig> {
   try {
-    const data = await fs.readFile(CONFIG_FILE, 'utf-8');
-    const parsed = JSON.parse(data);
-    
-    // Check if it's already a multi-platform config
-    if (parsed.platforms) {
-      return parsed as MultiPlatformConfig;
+    const parsed = await readCredentialsFile();
+    if (!parsed) {
+      return { platforms: {} };
     }
-    
-    // Migrate single-platform config to multi-platform
-    return await migrateSinglePlatformConfig(parsed as AuthConfig);
+    if (isMultiPlatform(parsed)) {
+      return parsed;
+    }
+    return await withCredentialsLock(loadCredentialsLocked);
   } catch {
-    // Return empty multi-platform config
     return { platforms: {} };
   }
 }
 
 export async function saveMultiPlatformConfig(config: MultiPlatformConfig): Promise<void> {
-  await ensureConfigDir();
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  await writeCredentialsFile(JSON.stringify(config, null, 2));
 }
 
 export async function getActivePlatformConfig(): Promise<AuthConfig | null> {
@@ -98,7 +221,11 @@ export async function getActivePlatformConfig(): Promise<AuthConfig | null> {
 }
 
 export async function savePlatformConfig(platformId: string, authConfig: AuthConfig, platformInfo: PlatformInfo): Promise<void> {
-  const multiConfig = await loadMultiPlatformConfig();
+  await withCredentialsLock(() => applyPlatformConfig(platformId, authConfig, platformInfo));
+}
+
+async function applyPlatformConfig(platformId: string, authConfig: AuthConfig, platformInfo: PlatformInfo): Promise<void> {
+  const multiConfig = await loadCredentialsLocked();
   
   multiConfig.platforms[platformId] = {
     ...authConfig,
@@ -114,7 +241,11 @@ export async function savePlatformConfig(platformId: string, authConfig: AuthCon
 }
 
 export async function switchPlatform(platformId: string): Promise<boolean> {
-  const multiConfig = await loadMultiPlatformConfig();
+  return withCredentialsLock(() => applySwitchPlatform(platformId));
+}
+
+async function applySwitchPlatform(platformId: string): Promise<boolean> {
+  const multiConfig = await loadCredentialsLocked();
   
   if (!multiConfig.platforms[platformId]) {
     return false;
@@ -136,7 +267,11 @@ export async function listPlatforms(): Promise<Array<{ id: string; info: Platfor
 }
 
 export async function removePlatform(platformId: string): Promise<boolean> {
-  const multiConfig = await loadMultiPlatformConfig();
+  return withCredentialsLock(() => applyRemovePlatform(platformId));
+}
+
+async function applyRemovePlatform(platformId: string): Promise<boolean> {
+  const multiConfig = await loadCredentialsLocked();
   
   if (!multiConfig.platforms[platformId]) {
     return false;
@@ -154,7 +289,7 @@ export async function removePlatform(platformId: string): Promise<boolean> {
   return true;
 }
 
-// Migration helper
+// Migration helper. The caller holds the credentials lock.
 async function migrateSinglePlatformConfig(authConfig: AuthConfig): Promise<MultiPlatformConfig> {
   const platformInfo: PlatformInfo = generatePlatformInfo(authConfig.host);
   
@@ -203,7 +338,12 @@ function generatePlatformInfo(host: string): PlatformInfo {
 
 // Helper to save updates to a named platform
 export async function savePlatformUpdates(platformId: string, updates: Partial<AuthConfig>): Promise<void> {
-  const multiConfig = await loadMultiPlatformConfig();
+  await withCredentialsLock(() => applyPlatformUpdates(platformId, updates));
+}
+
+/** savePlatformUpdates for a caller that already holds the credentials lock. */
+export async function applyPlatformUpdates(platformId: string, updates: Partial<AuthConfig>): Promise<void> {
+  const multiConfig = await loadCredentialsLocked();
   const current = multiConfig.platforms[platformId];
   if (!current) {
     throw new Error(`Platform configuration not found: ${platformId}`);

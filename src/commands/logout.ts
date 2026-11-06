@@ -1,9 +1,8 @@
 import { Command } from 'commander';
 import inquirer from 'inquirer';
-import { unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import chalk from 'chalk';
-import { CONFIG_FILE } from '../utils/config.js';
+import { CONFIG_FILE, clearAuthConfig } from '../utils/config.js';
 import { Logger } from '../utils/logger.js';
 
 const logger = new Logger('Logout');
@@ -41,7 +40,7 @@ async function handleLogout() {
     }
 
     // Remove credentials file
-    await unlink(CONFIG_FILE);
+    await clearAuthConfig();
     
     logger.info(`${chalk.green('✓')} Successfully logged out`);
     logger.info('Run `quant-cloud login` to authenticate again');
